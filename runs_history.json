@@ -92,58 +92,6 @@
     },
     "floors": {
       "team1": [
-        4,
-        5,
-        8
-      ],
-      "team2": [
-        8,
-        1,
-        9
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ],
-      "team2": [
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
         17,
         5,
         24
@@ -159,405 +107,9 @@
     "teams": {
       "team1": [
         {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ],
-      "team2": [
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
-        17,
-        5,
-        24
-      ],
-      "team2": [
-        3,
-        7,
-        18
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ],
-      "team2": [
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
-        17,
-        5,
-        24
-      ],
-      "team2": [
-        3,
-        7,
-        18
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ],
-      "team2": [
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        },
-        {
-          "char": null,
-          "weapon": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
-        17,
-        5,
-        24
-      ],
-      "team2": [
-        3,
-        7,
-        18
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ],
-      "team2": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
-        60,
-        60,
-        60
-      ],
-      "team2": [
-        0,
-        0,
-        0
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ],
-      "team2": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
-        60,
-        60,
-        60
-      ],
-      "team2": [
-        0,
-        0,
-        0
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ],
-      "team2": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
-        60,
-        60,
-        60
-      ],
-      "team2": [
-        0,
-        0,
-        0
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ],
-      "team2": [
-        {
-          "char": "assets/characters\\char_20.png",
-          "weapon": "assets/characters\\char_14.png",
-          "artifact": "assets/weapons\\weapon_31.png"
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        },
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
-        }
-      ]
-    },
-    "floors": {
-      "team1": [
-        60,
-        60,
-        60
-      ],
-      "team2": [
-        0,
-        0,
-        0
-      ]
-    }
-  },
-  {
-    "teams": {
-      "team1": [
-        {
-          "char": null,
-          "weapon": null,
-          "artifact": null
+          "char": "assets/characters\\char_14.png",
+          "weapon": "assets/weapons\\weapon_30.png",
+          "artifact": "assets/weapons\\weapon_16.png"
         },
         {
           "char": null,
@@ -600,14 +152,134 @@
     },
     "floors": {
       "team1": [
-        0,
-        0,
+        74,
+        254,
         120
+      ],
+      "team2": [
+        67,
+        -254,
+        180
+      ]
+    }
+  },
+  {
+    "teams": {
+      "team1": [
+        {
+          "char": "assets/characters\\char_12.png",
+          "weapon": null,
+          "artifact": "assets/weapons\\weapon_16.png"
+        },
+        {
+          "char": null,
+          "weapon": null,
+          "artifact": null
+        },
+        {
+          "char": null,
+          "weapon": null,
+          "artifact": null
+        },
+        {
+          "char": null,
+          "weapon": null,
+          "artifact": null
+        }
+      ],
+      "team2": [
+        {
+          "char": "assets/characters\\char_14.png",
+          "weapon": null,
+          "artifact": null
+        },
+        {
+          "char": null,
+          "weapon": null,
+          "artifact": null
+        },
+        {
+          "char": null,
+          "weapon": null,
+          "artifact": null
+        },
+        {
+          "char": null,
+          "weapon": null,
+          "artifact": null
+        }
+      ]
+    },
+    "floors": {
+      "team1": [
+        1,
+        6,
+        0
+      ],
+      "team2": [
+        2,
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "teams": {
+      "team1": [
+        {
+          "char": "assets/characters\\char_14.png",
+          "weapon": "assets/weapons\\weapon_37.png",
+          "artifact": null
+        },
+        {
+          "char": "assets/characters\\char_16.png",
+          "weapon": "assets/weapons\\weapon_38.png",
+          "artifact": null
+        },
+        {
+          "char": "assets/characters\\char_17.png",
+          "weapon": "assets/weapons\\weapon_2.png",
+          "artifact": null
+        },
+        {
+          "char": "assets/characters\\char_18.png",
+          "weapon": "assets/weapons\\weapon_18.png",
+          "artifact": null
+        }
+      ],
+      "team2": [
+        {
+          "char": "assets/characters\\char_26.png",
+          "weapon": "assets/weapons\\weapon_8.png",
+          "artifact": null
+        },
+        {
+          "char": "assets/characters\\char_25.png",
+          "weapon": null,
+          "artifact": null
+        },
+        {
+          "char": "assets/characters\\char_28.png",
+          "weapon": "assets/weapons\\weapon_32.png",
+          "artifact": null
+        },
+        {
+          "char": "assets/characters\\char_48.png",
+          "weapon": null,
+          "artifact": null
+        }
+      ]
+    },
+    "floors": {
+      "team1": [
+        0,
+        0,
+        0
       ],
       "team2": [
         0,
         0,
-        130
+        0
       ]
     }
   }

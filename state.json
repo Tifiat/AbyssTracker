@@ -9,8 +9,8 @@
       "t2": 600
     },
     {
-      "t1": 480,
-      "t2": 300
+      "t1": 600,
+      "t2": 600
     }
   ],
   "teams": [
@@ -38,9 +38,9 @@
     ],
     [
       {
-        "char": "assets/weapons\\weapon_31.png",
-        "weapon": "assets/weapons\\weapon_32.png",
-        "artifact": "assets/weapons\\weapon_31.png"
+        "char": null,
+        "weapon": null,
+        "artifact": null
       },
       {
         "char": null,
