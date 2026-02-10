@@ -33,29 +33,30 @@ class Rect:
 
 class HoyolabParser:
     """
-    icons-first парсер HoYoLAB:
+    HoYoLAB icons-first парсер.
 
-    1) ui_mask (тёмное + низко-насыщенное) -> инвертируем -> islands контента белые
-    2) морфология для стабилизации
-    3) fill_holes (правильный) чтобы квадраты не рвались
-    4) connected components -> квадратные большие bbox = персонажи
-    5) по квадрату персонажа восстанавливаем виртуальную карточку и режем оружие по долям
-    6) много дебага
+    Pipeline:
+    1) Находим квадраты персонажей (портреты) через сегментацию UI + морфологию + контуры.
+    2) Восстанавливаем "виртуальную" карточку по долям, используя квадрат персонажа как якорь.
+    3) Автокалибруем dx оружия (на каждом скрине отдельно) по маске через IoU.
+    4) Режем иконки персонажей и оружия.
+    5) Пишем дебаг-артефакты (маски, оверлеи, json калибровки).
     """
 
     # ---- Нормализованные доли внутри карточки (из 332x167) ----
+    # Персонаж (квадрат слева)
     CHAR_X = 0.0271
     CHAR_Y = 0.0659
     CHAR_W = 0.4458
     CHAR_H = 0.8862
 
+    # Оружие (квадрат справа снизу)
     WEAP_X = 0.5090
     WEAP_Y = 0.5689
-    WEAP_DX = -0.02  # сдвиг по X (в долях ширины карточки); минус = влево
-    WEAP_DY = 0.00  # если нужно по Y
     WEAP_W = 0.1898
     WEAP_H = 0.3772
 
+    # Эталон карточки
     CARD_W_REF = 332.0
     CARD_H_REF = 167.0
     CARD_ASPECT = CARD_H_REF / CARD_W_REF  # ~0.503
@@ -77,7 +78,6 @@ class HoyolabParser:
         os.makedirs(self.out_dir, exist_ok=True)
         os.makedirs(os.path.join(self.out_dir, "characters"), exist_ok=True)
         os.makedirs(os.path.join(self.out_dir, "weapons"), exist_ok=True)
-
         if self.debug:
             os.makedirs(self.debug_dir, exist_ok=True)
 
@@ -86,6 +86,10 @@ class HoyolabParser:
         self.image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
         if self.image is None:
             raise ValueError(f"Не удалось открыть изображение: {image_path}")
+
+        # заполняются внутри find_character_squares()
+        self._mask_for_cnt_small: Optional[np.ndarray] = None
+        self._mask_scale: Optional[float] = None
 
     # ---------------------------
     # Public API
@@ -96,18 +100,22 @@ class HoyolabParser:
         char_squares = self.find_character_squares(img)
         char_squares = self.sort_rects_reading_order(char_squares)
 
-        results: List[Dict[str, Any]] = []
-
         dx_auto = self.calibrate_weapon_dx(char_squares)
-        if self.debug:
-            print("AUTO weapon dx =", dx_auto)
+
+        results: List[Dict[str, Any]] = []
 
         for i, char_sq in enumerate(char_squares):
             card = self.estimate_card_from_char_square(char_sq)
 
             char_icon = self.crop_rect(img, char_sq, pad=0.02)
 
-            weapon_rect = self.rect_from_rel(card, self.WEAP_X + dx_auto, self.WEAP_Y, self.WEAP_W, self.WEAP_H)
+            weapon_rect = self.rect_from_rel(
+                card,
+                self.WEAP_X + dx_auto,
+                self.WEAP_Y,
+                self.WEAP_W,
+                self.WEAP_H,
+            )
             weap_icon = self.crop_rect(img, weapon_rect, pad=0.02)
 
             cv2.imwrite(os.path.join(self.out_dir, "characters", f"char_{i:03d}.png"), char_icon)
@@ -121,8 +129,9 @@ class HoyolabParser:
             })
 
         if self.debug:
-            self.write_debug_summary(char_squares, results)
+            self._dbg_save_overlay(img, char_squares, "char_squares_overlay_original.png")
             self._dbg_overlay_pairs(img, results, name="pairs_overlay_original.png")
+            self.write_debug_summary(char_squares, results)
 
         return results
 
@@ -143,6 +152,7 @@ class HoyolabParser:
         hsv = cv2.cvtColor(img_small, cv2.COLOR_BGR2HSV)
         _, S, V = cv2.split(hsv)
 
+        # динамические пороги
         s_p60 = int(np.percentile(S, 60))
         s_thr = min(90, max(35, s_p60))
 
@@ -156,7 +166,7 @@ class HoyolabParser:
         icons_mask = 255 - ui_mask
 
         # 1) удаляем тонкие структуры (текст/шумы), оставляем толстые квадраты
-        k_text = max(5, int(ws * 0.005) | 1)  # можно 0.005..0.009
+        k_text = max(5, int(ws * 0.005) | 1)  # 0.005..0.009
         kernel_text = cv2.getStructuringElement(cv2.MORPH_RECT, (k_text, k_text))
         mask_no_text = cv2.morphologyEx(icons_mask, cv2.MORPH_OPEN, kernel_text, iterations=1)
 
@@ -165,7 +175,7 @@ class HoyolabParser:
         kernel_patch = cv2.getStructuringElement(cv2.MORPH_RECT, (k_patch, k_patch))
         mask_for_cnt = cv2.morphologyEx(mask_no_text, cv2.MORPH_CLOSE, kernel_patch, iterations=1)
 
-        # гарантируем бинарность
+        # бинарность
         _, mask_for_cnt = cv2.threshold(mask_for_cnt, 127, 255, cv2.THRESH_BINARY)
 
         # сохраним маску и scale для автокалибровки оружия
@@ -173,7 +183,6 @@ class HoyolabParser:
         self._mask_scale = scale
 
         if self.debug:
-            os.makedirs(self.debug_dir, exist_ok=True)
             cv2.imwrite(os.path.join(self.debug_dir, "04_icons_mask_inverted.png"), icons_mask)
             cv2.imwrite(os.path.join(self.debug_dir, "06_icons_mask_no_text.png"), mask_for_cnt)
             vis = img_small.copy()
@@ -189,7 +198,7 @@ class HoyolabParser:
             )
             cv2.imwrite(os.path.join(self.debug_dir, "00_small_with_thresholds.png"), vis)
 
-        # 3) контуры вместо connectedComponents
+        # 3) контуры
         contours, _ = cv2.findContours(mask_for_cnt, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         rects: List[Rect] = []
@@ -207,7 +216,7 @@ class HoyolabParser:
                 continue
 
             aspect = w / float(h)
-            if not (0.60 <= aspect <= 1.60):  # широкий допуск, квадраты могут быть “пожёваны”
+            if not (0.60 <= aspect <= 1.60):  # “пожёванные” квадраты
                 continue
 
             rects.append(Rect(x, y, w, h))
@@ -217,24 +226,21 @@ class HoyolabParser:
                 self._dbg_save_overlay(img_small, [], "char_squares_overlay_small_none.png")
             return []
 
-        # 4) ВАЖНО: портреты — крупнейшие. Выбираем кластер по размеру (медиана у больших)
+        # 4) выбираем кластер "самых больших" (портреты)
         sizes = np.array([min(r.w, r.h) for r in rects], dtype=np.float32)
 
-        # Сортируем прямоугольники по размеру (самые большие сверху)
         rects_sorted = sorted(rects, key=lambda r: min(r.w, r.h), reverse=True)
         s_sorted = np.array([min(r.w, r.h) for r in rects_sorted], dtype=np.float32)
 
-        # Ищем место, где размер резко падает (портреты -> оружие)
         drops = s_sorted[:-1] / np.maximum(1.0, s_sorted[1:])
         if drops.size > 0 and np.any(drops > 1.25):
             cut = int(np.argmax(drops > 1.25))
             big = rects_sorted[:cut + 1]
         else:
-            # если не нашли резкого падения — берём верхние 70%
             thr = float(np.percentile(sizes, 30))
             big = [r for r in rects if min(r.w, r.h) >= thr]
 
-        # 5) “доквадрачиваем” bbox: делаем квадрат по центру bbox, чтобы резать аккуратно
+        # 5) “доквадрачиваем” bbox: квадрат по центру
         big_sq: List[Rect] = []
         for r in big:
             side = int(round(max(r.w, r.h)))
@@ -244,7 +250,6 @@ class HoyolabParser:
             y2 = int(round(cy - side / 2.0))
             big_sq.append(Rect(x2, y2, side, side))
 
-        # debug overlay on small
         if self.debug:
             self._dbg_save_overlay(img_small, big_sq, "char_squares_overlay_small.png")
 
@@ -261,58 +266,26 @@ class HoyolabParser:
         ]
         rects_orig = self.clip_rects(rects_orig, w0, h0)
 
-        if self.debug:
-            self._dbg_save_overlay(img_bgr, rects_orig, "char_squares_overlay_original.png")
-
         return rects_orig
-    # ---------------------------
-    # Correct fill holes
-    # ---------------------------
-    def fill_holes_correct(self, bin_mask: np.ndarray) -> np.ndarray:
-        """
-        Правильная заливка дыр:
-        - bin_mask: 0/255, 255 = объект
-        - FloodFill по фоновой области НА САМОЙ маске (а не на инвертированной).
-        - Потом holes = NOT(flooded_background) AND NOT(original_background)
-        Классическая схема:
-          flood = mask.copy()
-          floodFill(flood, (0,0), 255) по инвертированной маске
-        Но делаем проще/надежнее:
-          1) invert mask => background becomes white
-          2) floodFill from (0,0) to mark reachable background
-          3) invert back => unreachable background are holes
-          4) OR with original
-        """
-        if bin_mask.dtype != np.uint8:
-            bin_mask = bin_mask.astype(np.uint8)
-
-        mask = bin_mask.copy()
-        h, w = mask.shape[:2]
-
-        inv = cv2.bitwise_not(mask)  # background white
-        ff = inv.copy()
-        flood_mask = np.zeros((h + 2, w + 2), np.uint8)
-        cv2.floodFill(ff, flood_mask, (0, 0), 255)  # mark reachable background
-
-        # holes are background regions NOT reachable from border
-        ff_inv = cv2.bitwise_not(ff)          # unreachable background -> white (holes + original objects)
-        holes = cv2.bitwise_and(ff_inv, inv)  # keep only holes (exclude original objects)
-
-        filled = cv2.bitwise_or(mask, holes)
-        return filled
 
     # ---------------------------
-    # Geometry
+    # Geometry / Crops
     # ---------------------------
     def estimate_card_from_char_square(self, char_sq: Rect) -> Rect:
+        # card_w от квадрата персонажа
         card_w = float(char_sq.w) / float(self.CHAR_W)
+        # card_h строго из аспекта карточки (стабильно!)
         card_h = card_w * float(self.CARD_ASPECT)
 
         card_x = float(char_sq.x) - self.CHAR_X * card_w
         card_y = float(char_sq.y) - self.CHAR_Y * card_h
 
-        return Rect(int(round(card_x)), int(round(card_y)),
-                    int(round(card_w)), int(round(card_h)))
+        return Rect(
+            int(round(card_x)),
+            int(round(card_y)),
+            int(round(card_w)),
+            int(round(card_h)),
+        )
 
     def rect_from_rel(self, card: Rect, rx: float, ry: float, rw: float, rh: float) -> Rect:
         x = int(round(card.x + rx * card.w))
@@ -321,16 +294,33 @@ class HoyolabParser:
         h = int(round(rh * card.h))
         return Rect(x, y, w, h)
 
-    def _score_white_ratio(self, mask_small: np.ndarray, r: Rect) -> float:
-        """Доля белых пикселей внутри прямоугольника r на бинарной маске."""
-        h, w = mask_small.shape[:2]
-        x1 = max(0, min(w - 1, r.x))
-        y1 = max(0, min(h - 1, r.y))
-        x2 = max(x1 + 1, min(w, r.x2))
-        y2 = max(y1 + 1, min(h, r.y2))
-        roi = mask_small[y1:y2, x1:x2]
-        return float(np.mean(roi > 0))
+    def crop_rect(self, img_bgr: np.ndarray, r: Rect, pad: float = 0.0) -> np.ndarray:
+        """pad: доля от min(w,h), срезаем внутрь (чтобы не цеплять рамку/антиалиас)."""
+        h, w = img_bgr.shape[:2]
+        p = int(round(min(r.w, r.h) * pad))
 
+        x1 = max(0, min(w - 1, r.x + p))
+        y1 = max(0, min(h - 1, r.y + p))
+        x2 = max(x1 + 1, min(w, r.x2 - p))
+        y2 = max(y1 + 1, min(h, r.y2 - p))
+
+        return img_bgr[y1:y2, x1:x2].copy()
+
+    def clip_rects(self, rects: List[Rect], w: int, h: int) -> List[Rect]:
+        out = []
+        for r in rects:
+            x1 = max(0, min(w - 1, r.x))
+            y1 = max(0, min(h - 1, r.y))
+            x2 = max(0, min(w, r.x2))
+            y2 = max(0, min(h, r.y2))
+            ww = max(1, x2 - x1)
+            hh = max(1, y2 - y1)
+            out.append(Rect(x1, y1, ww, hh))
+        return out
+
+    # ---------------------------
+    # Weapon dx calibration (IoU)
+    # ---------------------------
     def _iou(self, a: Rect, b: Rect) -> float:
         x1 = max(a.x, b.x)
         y1 = max(a.y, b.y)
@@ -343,7 +333,7 @@ class HoyolabParser:
         return float(inter) / float(max(1, union))
 
     def _find_best_white_bbox_in_window(self, mask_small: np.ndarray, win: Rect) -> Optional[Rect]:
-        """В окне win находим bbox самого большого белого объекта (оружие)."""
+        """В окне win находим bbox самого большого белого объекта (обычно оружие)."""
         h, w = mask_small.shape[:2]
         x1 = max(0, min(w - 1, win.x))
         y1 = max(0, min(h - 1, win.y))
@@ -370,14 +360,18 @@ class HoyolabParser:
         return best
 
     def calibrate_weapon_dx(self, char_squares: List[Rect], samples: int = 20) -> float:
-        mask_small = getattr(self, "_mask_for_cnt_small", None)
-        scale = getattr(self, "_mask_scale", None)
+        """
+        Автоподбор dx (в долях ширины карточки) для оружия.
+        Находим dx, который даёт лучший IoU между ожидаемым weapon_rect и реальным белым bbox на маске.
+        """
+        mask_small = self._mask_for_cnt_small
+        scale = self._mask_scale
         if mask_small is None or scale is None or not char_squares:
             return 0.0
 
         use = char_squares[: min(samples, len(char_squares))]
 
-        dx_candidates = np.linspace(-0.04, 0.04, 33)  # шаг ~0.0025, точнее
+        dx_candidates = np.linspace(-0.04, 0.04, 33)  # шаг ~0.0025
         best_dx = 0.0
         best_score = -1.0
         scores_dump = []
@@ -416,7 +410,6 @@ class HoyolabParser:
                 best_dx = float(dx)
 
         if self.debug:
-            os.makedirs(self.debug_dir, exist_ok=True)
             with open(os.path.join(self.debug_dir, "weapon_dx_calibration.json"), "w", encoding="utf-8") as f:
                 json.dump(
                     {"best_dx": best_dx, "best_score": best_score, "scores": scores_dump},
@@ -431,12 +424,15 @@ class HoyolabParser:
             return 0.0
 
         return best_dx
+
     # ---------------------------
     # Sorting
     # ---------------------------
     def sort_rects_reading_order(self, rects: List[Rect]) -> List[Rect]:
+        """Сортировка в порядке чтения: сверху вниз, слева направо (устойчиво по строкам)."""
         if not rects:
             return []
+
         rects = rects[:]
         rects.sort(key=lambda r: r.cy)
 
@@ -461,32 +457,6 @@ class HoyolabParser:
         return [r for row in rows for r in row]
 
     # ---------------------------
-    # Crop / clip
-    # ---------------------------
-    def crop_rect(self, img_bgr: np.ndarray, r: Rect, pad: float = 0.0) -> np.ndarray:
-        h, w = img_bgr.shape[:2]
-        p = int(round(min(r.w, r.h) * pad))
-
-        x1 = max(0, min(w - 1, r.x + p))
-        y1 = max(0, min(h - 1, r.y + p))
-        x2 = max(x1 + 1, min(w, r.x2 - p))
-        y2 = max(y1 + 1, min(h, r.y2 - p))
-
-        return img_bgr[y1:y2, x1:x2].copy()
-
-    def clip_rects(self, rects: List[Rect], w: int, h: int) -> List[Rect]:
-        out = []
-        for r in rects:
-            x1 = max(0, min(w - 1, r.x))
-            y1 = max(0, min(h - 1, r.y))
-            x2 = max(0, min(w, r.x2))
-            y2 = max(0, min(h, r.y2))
-            ww = max(1, x2 - x1)
-            hh = max(1, y2 - y1)
-            out.append(Rect(x1, y1, ww, hh))
-        return out
-
-    # ---------------------------
     # Debug
     # ---------------------------
     def _dbg_save_overlay(self, img_bgr: np.ndarray, rects: List[Rect], name: str):
@@ -495,8 +465,16 @@ class HoyolabParser:
         vis = img_bgr.copy()
         for i, r in enumerate(rects):
             cv2.rectangle(vis, (r.x, r.y), (r.x2, r.y2), (0, 255, 0), 2)
-            cv2.putText(vis, str(i), (r.x + 4, r.y + 18),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(
+                vis,
+                str(i),
+                (r.x + 4, r.y + 18),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
         cv2.imwrite(os.path.join(self.debug_dir, name), vis)
 
     def _dbg_overlay_pairs(self, img_bgr: np.ndarray, results: List[Dict[str, Any]], name: str):
@@ -528,12 +506,13 @@ class HoyolabParser:
             "char_squares_found": len(char_squares),
             "results_count": len(results),
             "notes": [
-                "01_ui_mask.png: белое = тёмный UI",
-                "04_icons_mask_inverted.png: белое = островки контента (иконки/текст)",
-                "05_icons_mask_filled.png: после fill_holes_correct (есть safety-guard)",
-                "char_squares_overlay_original.png: выбранные квадраты персонажей",
-                "pairs_overlay_original.png: синий=перс, жёлтый=карта(оценка), красный=оружие",
-                "candidates_char_squares.json: кандидаты с aspect/fill_ratio/size",
+                "00_small_with_thresholds.png: пороги сегментации и параметры морфологии",
+                "04_icons_mask_inverted.png: белое = островки контента (иконки/текст) после инверта ui_mask",
+                "06_icons_mask_no_text.png: после морфологии (текст/шумы убраны, квадраты стабильнее)",
+                "char_squares_overlay_small.png: квадраты персонажей на уменьшенной картинке (debug)",
+                "char_squares_overlay_original.png: квадраты персонажей в оригинальных координатах",
+                "weapon_dx_calibration.json: подбор dx для оружия по IoU",
+                "pairs_overlay_original.png: синий=перс, жёлтый=карточка(оценка), красный=оружие",
             ],
         }
         with open(os.path.join(self.debug_dir, "summary.json"), "w", encoding="utf-8") as f:
