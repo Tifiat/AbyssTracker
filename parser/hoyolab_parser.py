@@ -1,7 +1,7 @@
 import os
 import json
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -30,36 +30,21 @@ class Rect:
     def cy(self) -> float:
         return self.y + self.h / 2.0
 
+    @property
+    def side_min(self) -> int:
+        return int(min(self.w, self.h))
+
+    def as_dict(self) -> Dict[str, int]:
+        return {"x": int(self.x), "y": int(self.y), "w": int(self.w), "h": int(self.h)}
+
 
 class HoyolabParser:
     """
-    HoYoLAB icons-first парсер.
+    HoYoLAB icons-first парсер (без карточек/костылей; два независимых стека).
 
-    Pipeline:
-    1) Находим квадраты персонажей (портреты) через сегментацию UI + морфологию + контуры.
-    2) Восстанавливаем "виртуальную" карточку по долям, используя квадрат персонажа как якорь.
-    3) Автокалибруем dx оружия (на каждом скрине отдельно) по маске через IoU.
-    4) Режем иконки персонажей и оружия.
-    5) Пишем дебаг-артефакты (маски, оверлеи, json калибровки).
+    ВАЖНО: ref_width используется только для downscale (никогда не апскейлим),
+    чтобы не плодить артефакты на маленьких скринах.
     """
-
-    # ---- Нормализованные доли внутри карточки (из 332x167) ----
-    # Персонаж (квадрат слева)
-    CHAR_X = 0.0271
-    CHAR_Y = 0.0659
-    CHAR_W = 0.4458
-    CHAR_H = 0.8862
-
-    # Оружие (квадрат справа снизу)
-    WEAP_X = 0.5090
-    WEAP_Y = 0.5689
-    WEAP_W = 0.1898
-    WEAP_H = 0.3772
-
-    # Эталон карточки
-    CARD_W_REF = 332.0
-    CARD_H_REF = 167.0
-    CARD_ASPECT = CARD_H_REF / CARD_W_REF  # ~0.503
 
     def __init__(
         self,
@@ -72,8 +57,8 @@ class HoyolabParser:
         self.image_path = image_path
         self.out_dir = out_dir
         self.debug_dir = debug_dir
-        self.ref_width = ref_width
-        self.debug = debug
+        self.ref_width = int(ref_width)
+        self.debug = bool(debug)
 
         os.makedirs(self.out_dir, exist_ok=True)
         os.makedirs(os.path.join(self.out_dir, "characters"), exist_ok=True)
@@ -87,100 +72,97 @@ class HoyolabParser:
         if self.image is None:
             raise ValueError(f"Не удалось открыть изображение: {image_path}")
 
-        # заполняются внутри find_character_squares()
         self._mask_for_cnt_small: Optional[np.ndarray] = None
-        self._mask_scale: Optional[float] = None
+        self._scale_x: Optional[float] = None
+        self._scale_y: Optional[float] = None
+        self._dbg_params: Dict[str, Any] = {}
 
     # ---------------------------
     # Public API
     # ---------------------------
-    def parse(self) -> List[Dict[str, Any]]:
+    def parse(self) -> Dict[str, Any]:
         img = self.image
+        big_squares, small_squares = self.find_icon_squares(img)
 
-        char_squares = self.find_character_squares(img)
-        char_squares = self.sort_rects_reading_order(char_squares)
+        # порядок не важен, но сортировка помогает отладке
+        big_squares = self.sort_rects_reading_order(big_squares)
+        small_squares = self.sort_rects_reading_order(small_squares)
 
-        dx_auto = self.calibrate_weapon_dx(char_squares)
+        chars_out: List[Dict[str, Any]] = []
+        weaps_out: List[Dict[str, Any]] = []
 
-        results: List[Dict[str, Any]] = []
+        for i, r in enumerate(big_squares):
+            crop = self.crop_rect(img, r, pad=0.02)
+            cv2.imwrite(os.path.join(self.out_dir, "characters", f"char_{i:03d}.png"), crop)
+            chars_out.append({"index": i, "rect": r.as_dict()})
 
-        for i, char_sq in enumerate(char_squares):
-            card = self.estimate_card_from_char_square(char_sq)
-
-            char_icon = self.crop_rect(img, char_sq, pad=0.02)
-
-            weapon_rect = self.rect_from_rel(
-                card,
-                self.WEAP_X + dx_auto,
-                self.WEAP_Y,
-                self.WEAP_W,
-                self.WEAP_H,
-            )
-            weap_icon = self.crop_rect(img, weapon_rect, pad=0.02)
-
-            cv2.imwrite(os.path.join(self.out_dir, "characters", f"char_{i:03d}.png"), char_icon)
-            cv2.imwrite(os.path.join(self.out_dir, "weapons", f"weapon_{i:03d}.png"), weap_icon)
-
-            results.append({
-                "index": i,
-                "char_square": {"x": char_sq.x, "y": char_sq.y, "w": char_sq.w, "h": char_sq.h},
-                "estimated_card": {"x": card.x, "y": card.y, "w": card.w, "h": card.h},
-                "weapon_rect": {"x": weapon_rect.x, "y": weapon_rect.y, "w": weapon_rect.w, "h": weapon_rect.h},
-            })
+        for j, r in enumerate(small_squares):
+            crop = self.crop_rect(img, r, pad=0.02)
+            cv2.imwrite(os.path.join(self.out_dir, "weapons", f"weapon_{j:03d}.png"), crop)
+            weaps_out.append({"index": j, "rect": r.as_dict()})
 
         if self.debug:
-            self._dbg_save_overlay(img, char_squares, "char_squares_overlay_original.png")
-            self._dbg_overlay_pairs(img, results, name="pairs_overlay_original.png")
-            self.write_debug_summary(char_squares, results)
+            self._dbg_save_overlay(img, big_squares, "char_squares_overlay_original.png", color=(255, 0, 0))  # blue
+            self._dbg_save_overlay(img, small_squares, "weapon_squares_overlay_original.png", color=(0, 0, 255))  # red
+            self._dbg_overlay_two_sets(img, big_squares, small_squares, name="pairs_overlay_original.png")
+            self.write_debug_summary(big_squares, small_squares, chars_out, weaps_out)
 
-        return results
+        return {"characters": chars_out, "weapons": weaps_out}
 
     # ---------------------------
-    # Detect character squares
+    # Detect icon squares (big+small)
     # ---------------------------
-    def find_character_squares(self, img_bgr: np.ndarray) -> List[Rect]:
+    def find_icon_squares(self, img_bgr: np.ndarray) -> Tuple[List[Rect], List[Rect]]:
         h0, w0 = img_bgr.shape[:2]
 
-        # normalize scale for stable morphology thresholds
-        scale = self.ref_width / float(w0) if w0 > self.ref_width else 1.0
-        img_small = (
-            cv2.resize(img_bgr, (int(w0 * scale), int(h0 * scale)), interpolation=cv2.INTER_AREA)
-            if scale != 1.0 else img_bgr.copy()
-        )
+        img_small, sx, sy = self._resize_to_ref_width(img_bgr, self.ref_width)  # downscale-only
         hs, ws = img_small.shape[:2]
 
         hsv = cv2.cvtColor(img_small, cv2.COLOR_BGR2HSV)
         _, S, V = cv2.split(hsv)
 
-        # динамические пороги
         s_p60 = int(np.percentile(S, 60))
         s_thr = min(90, max(35, s_p60))
 
         v_p55 = int(np.percentile(V, 55))
         v_thr = min(140, max(70, v_p55))
 
-        # ui_mask: white = dark+low sat (фон/панели)
         ui_mask = ((S < s_thr) & (V < v_thr)).astype(np.uint8) * 255
-
-        # invert => content islands are white
         icons_mask = 255 - ui_mask
 
-        # 1) удаляем тонкие структуры (текст/шумы), оставляем толстые квадраты
-        k_text = max(5, int(ws * 0.005) | 1)  # 0.005..0.009
+        # Убрать тонкое (текст/шум), оставить толстые квадраты
+        k_text = max(5, int(ws * 0.005) | 1)
         kernel_text = cv2.getStructuringElement(cv2.MORPH_RECT, (k_text, k_text))
         mask_no_text = cv2.morphologyEx(icons_mask, cv2.MORPH_OPEN, kernel_text, iterations=1)
 
-        # 2) чуть “подштопать” квадраты
+        # Подштопать квадраты
         k_patch = max(3, int(ws * 0.003) | 1)
         kernel_patch = cv2.getStructuringElement(cv2.MORPH_RECT, (k_patch, k_patch))
         mask_for_cnt = cv2.morphologyEx(mask_no_text, cv2.MORPH_CLOSE, kernel_patch, iterations=1)
 
-        # бинарность
         _, mask_for_cnt = cv2.threshold(mask_for_cnt, 127, 255, cv2.THRESH_BINARY)
 
-        # сохраним маску и scale для автокалибровки оружия
+        # --- BREAK BRIDGES: режем тонкие горизонтальные перемычки между big и small ---
+        k_bridge = max(3, int(ws * 0.010) | 1)  # для ws=724 это ~7..9
+        kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, k_bridge))  # вертикальная палка
+        mask_for_cnt = cv2.morphologyEx(mask_for_cnt, cv2.MORPH_OPEN, kernel_v, iterations=1)
+
+        # (опционально) чуть подштопать края после разрыва
+        mask_for_cnt = cv2.morphologyEx(mask_for_cnt, cv2.MORPH_CLOSE, kernel_patch, iterations=1)
+
         self._mask_for_cnt_small = mask_for_cnt
-        self._mask_scale = scale
+        self._scale_x = sx
+        self._scale_y = sy
+        self._dbg_params = {
+            "s_thr": s_thr,
+            "v_thr": v_thr,
+            "k_text": k_text,
+            "k_patch": k_patch,
+            "scale_x": float(sx),
+            "scale_y": float(sy),
+            "small_shape": [int(hs), int(ws)],
+            "note": "downscale-only (no upscaling)",
+        }
 
         if self.debug:
             cv2.imwrite(os.path.join(self.debug_dir, "04_icons_mask_inverted.png"), icons_mask)
@@ -188,7 +170,7 @@ class HoyolabParser:
             vis = img_small.copy()
             cv2.putText(
                 vis,
-                f"s_thr={s_thr} v_thr={v_thr} k_text={k_text} k_patch={k_patch}",
+                f"s_thr={s_thr} v_thr={v_thr} k_text={k_text} k_patch={k_patch} sx={sx:.6f} sy={sy:.6f}",
                 (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
@@ -198,104 +180,311 @@ class HoyolabParser:
             )
             cv2.imwrite(os.path.join(self.debug_dir, "00_small_with_thresholds.png"), vis)
 
-        # 3) контуры
-        contours, _ = cv2.findContours(mask_for_cnt, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # --- connected components ---
+        binm = (mask_for_cnt > 0).astype(np.uint8)  # 0/1
+        num, labels, stats, _ = cv2.connectedComponentsWithStats(binm, connectivity=8)
 
-        rects: List[Rect] = []
-        img_area = ws * hs
+        img_area = float(ws * hs)
+        candidates: List[Rect] = []
 
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            if w < 2 or h < 2:
+        for i in range(1, num):
+            x, y, w, h, area = stats[i].tolist()
+            if w < 3 or h < 3:
                 continue
 
-            area_bbox = w * h
-            if area_bbox < img_area * 0.0005:  # мелочь
-                continue
-            if area_bbox > img_area * 0.08:  # слишком крупное (шапка/фон)
-                continue
+            roi = binm[y:y + h, x:x + w]
+            split_in_roi = self._split_merged_component_x(roi)
 
-            aspect = w / float(h)
-            if not (0.60 <= aspect <= 1.60):  # “пожёванные” квадраты
-                continue
+            parts = [Rect(x + r.x, y + r.y, r.w, r.h) for r in split_in_roi] if split_in_roi else [Rect(x, y, w, h)]
 
-            rects.append(Rect(x, y, w, h))
+            for r in parts:
+                ww, hh = r.w, r.h
+                if ww < 3 or hh < 3:
+                    continue
 
-        if not rects:
+                # === IMPORTANT: ужимаем bbox до реальных белых пикселей ===
+                rt = self._tighten_rect_to_mask(binm, r)
+                if rt is None:
+                    continue
+                r = rt
+                area_bbox = float(ww * hh)
+
+                # слишком мелкое
+                if area_bbox < img_area * 0.00002:
+                    continue
+                # слишком крупное
+                if area_bbox > img_area * 0.25:
+                    continue
+
+                aspect = ww / float(hh)
+                if not (0.70 <= aspect <= 1.45):
+                    continue
+
+                sub = binm[r.y:r.y + r.h, r.x:r.x + r.w]
+                white = float(sub.sum())  # 0/1
+                density = white / max(1.0, area_bbox)
+
+                # было 0.12; для оружия часто нужно мягче
+                if density < 0.08:
+                    continue
+                tight = self._tighten_rect_to_mask(binm, r)  # binm у тебя 0/1
+                if tight is None:
+                    continue
+                candidates.append(r)
+
+        if not candidates:
             if self.debug:
-                self._dbg_save_overlay(img_small, [], "char_squares_overlay_small_none.png")
-            return []
+                self._dbg_save_overlay(img_small, [], "char_squares_overlay_small_none.png", color=(0, 255, 0))
+            return [], []
 
-        # 4) выбираем кластер "самых больших" (портреты)
-        sizes = np.array([min(r.w, r.h) for r in rects], dtype=np.float32)
+        # --- split big/small по min(w,h) ДО squareize ---
+        sizes = np.array([c.side_min for c in candidates], dtype=np.float32)
 
-        rects_sorted = sorted(rects, key=lambda r: min(r.w, r.h), reverse=True)
-        s_sorted = np.array([min(r.w, r.h) for r in rects_sorted], dtype=np.float32)
+        # 1) выкидываем явные outlier'ы снизу, чтобы largest_gap не резался по мусору
+        p10 = float(np.percentile(sizes, 10))
+        floor = max(10.0, p10 * 0.70)  # у тебя p10=61 => floor~42, мусор 11 уйдёт
+        keep_idx = [i for i, s in enumerate(sizes) if float(s) >= floor]
 
-        drops = s_sorted[:-1] / np.maximum(1.0, s_sorted[1:])
-        if drops.size > 0 and np.any(drops > 1.25):
-            cut = int(np.argmax(drops > 1.25))
-            big = rects_sorted[:cut + 1]
-        else:
-            thr = float(np.percentile(sizes, 30))
-            big = [r for r in rects if min(r.w, r.h) >= thr]
+        candidates_kept = [candidates[i] for i in keep_idx]
+        sizes_kept = [int(round(sizes[i])) for i in keep_idx]
 
-        # 5) “доквадрачиваем” bbox: квадрат по центру
-        big_sq: List[Rect] = []
-        for r in big:
-            side = int(round(max(r.w, r.h)))
-            cx = r.x + r.w / 2.0
-            cy = r.y + r.h / 2.0
-            x2 = int(round(cx - side / 2.0))
-            y2 = int(round(cy - side / 2.0))
-            big_sq.append(Rect(x2, y2, side, side))
+        # дебаг в summary
+        self._dbg_params["sizes_floor"] = {"p10": p10, "floor": floor, "kept": len(candidates_kept),
+                                           "total": len(candidates)}
+
+        big_raw, small_raw, split_dbg = self._split_big_small_by_sizes(sizes_kept, candidates_kept)
+
+        self._dbg_params["split"] = split_dbg
+        self._dbg_params["sizes_stats"] = {
+            "count": int(len(sizes)),
+            "min": int(np.min(sizes)),
+            "p10": int(np.percentile(sizes, 10)),
+            "p50": int(np.percentile(sizes, 50)),
+            "p90": int(np.percentile(sizes, 90)),
+            "max": int(np.max(sizes)),
+        }
+
+        # squareize отдельно
+        big_sq = [self._squareize(r) for r in big_raw]
+        small_sq = [self._squareize(r) for r in small_raw]
 
         if self.debug:
-            self._dbg_save_overlay(img_small, big_sq, "char_squares_overlay_small.png")
+            self._dbg_save_overlay(img_small, big_sq, "char_squares_overlay_small.png", color=(0, 255, 0))
+            self._dbg_save_overlay(img_small, small_sq, "weapon_squares_overlay_small.png", color=(0, 0, 255))
 
-        # 6) convert to original coords
-        inv = 1.0 / scale
-        rects_orig = [
-            Rect(
-                x=int(round(r.x * inv)),
-                y=int(round(r.y * inv)),
-                w=int(round(r.w * inv)),
-                h=int(round(r.h * inv)),
-            )
-            for r in big_sq
-        ]
-        rects_orig = self.clip_rects(rects_orig, w0, h0)
+        big_orig = self._to_original_coords(big_sq, w0, h0, sx, sy)
+        small_orig = self._to_original_coords(small_sq, w0, h0, sx, sy)
 
-        return rects_orig
+        return big_orig, small_orig
 
     # ---------------------------
-    # Geometry / Crops
+    # Mizuki fix: split merged component by X-projection
     # ---------------------------
-    def estimate_card_from_char_square(self, char_sq: Rect) -> Rect:
-        # card_w от квадрата персонажа
-        card_w = float(char_sq.w) / float(self.CHAR_W)
-        # card_h строго из аспекта карточки (стабильно!)
-        card_h = card_w * float(self.CARD_ASPECT)
+    def _split_merged_component_x(self, bin_roi: np.ndarray) -> Optional[List[Rect]]:
+        h, w = bin_roi.shape[:2]
+        if h < 12 or w < 12:
+            return None
+        if w < int(h * 1.15):
+            return None
 
-        card_x = float(char_sq.x) - self.CHAR_X * card_w
-        card_y = float(char_sq.y) - self.CHAR_Y * card_h
+        col = bin_roi.sum(axis=0).astype(np.int32)  # 0..h
+        sig = col > int(h * 0.18)
 
-        return Rect(
-            int(round(card_x)),
-            int(round(card_y)),
-            int(round(card_w)),
-            int(round(card_h)),
-        )
+        runs = []
+        i = 0
+        while i < w:
+            if not sig[i]:
+                i += 1
+                continue
+            j = i
+            while j < w and sig[j]:
+                j += 1
+            runs.append((i, j))
+            i = j
 
-    def rect_from_rel(self, card: Rect, rx: float, ry: float, rw: float, rh: float) -> Rect:
-        x = int(round(card.x + rx * card.w))
-        y = int(round(card.y + ry * card.h))
-        w = int(round(rw * card.w))
-        h = int(round(rh * card.h))
-        return Rect(x, y, w, h)
+        if len(runs) < 2:
+            return None
 
+        min_run = max(8, int(h * 0.22))
+        runs = [(a, b) for (a, b) in runs if (b - a) >= min_run]
+        if len(runs) < 2:
+            return None
+
+        (a1, b1), (a2, b2) = runs[0], runs[1]
+        gap = a2 - b1
+        if gap < max(2, int(h * 0.03)):
+            return None
+
+        split_x = (b1 + a2) // 2
+
+        def tight_bbox(sub: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+            ys, xs = np.where(sub > 0)
+            if xs.size == 0:
+                return None
+            x1, x2 = int(xs.min()), int(xs.max()) + 1
+            y1, y2 = int(ys.min()), int(ys.max()) + 1
+            return x1, y1, x2, y2
+
+        left = bin_roi[:, :split_x]
+        right = bin_roi[:, split_x:]
+
+        bb1 = tight_bbox(left)
+        bb2 = tight_bbox(right)
+        if bb1 is None or bb2 is None:
+            return None
+
+        x1, y1, x2, y2 = bb1
+        r1 = Rect(x=x1, y=y1, w=x2 - x1, h=y2 - y1)
+
+        x1, y1, x2, y2 = bb2
+        r2 = Rect(x=split_x + x1, y=y1, w=x2 - x1, h=y2 - y1)
+
+        if r1.w < 8 or r1.h < 8 or r2.w < 8 or r2.h < 8:
+            return None
+
+        return [r1, r2]
+
+    # ---------------------------
+    # Split big/small robustly (sizes BEFORE squareize)
+    # ---------------------------
+    def _split_big_small_by_sizes(
+        self,
+        sizes: List[int],
+        rects: List[Rect],
+    ) -> Tuple[List[Rect], List[Rect], Dict[str, Any]]:
+        s = np.array([float(x) for x in sizes], dtype=np.float32)
+        if len(s) < 2:
+            return rects, [], {"method": "degenerate", "thr": None, "count": int(len(s))}
+
+        s_sorted = np.sort(s)
+        ratios = s_sorted[1:] / np.maximum(1.0, s_sorted[:-1])
+        k = int(np.argmax(ratios))
+        best_ratio = float(ratios[k])
+
+        # 1) если разрыв хороший — largest gap, но не даём ему резаться по мусору
+        use_largest_gap = best_ratio >= 1.25
+        if use_largest_gap:
+            thr_gap = float((s_sorted[k] + s_sorted[k + 1]) / 2.0)
+            p10 = float(np.percentile(s, 10))
+            if thr_gap < p10 * 0.9:
+                use_largest_gap = False  # это был разрыв "мусор -> всё остальное"
+
+        if use_largest_gap:
+            thr = thr_gap
+            big = [r for r, ss in zip(rects, s) if float(ss) >= thr]
+            small = [r for r, ss in zip(rects, s) if float(ss) < thr]
+            dbg = {"method": "largest_gap", "thr": thr, "best_ratio": best_ratio, "guard_p10": p10}
+        else:
+            # 2) fallback: k-means 1D (k=2), small=меньший центр
+            c1 = float(np.percentile(s, 25))
+            c2 = float(np.percentile(s, 85))
+            for _ in range(20):
+                d1 = np.abs(s - c1)
+                d2 = np.abs(s - c2)
+                lab = (d2 < d1).astype(np.int32)
+                c1n = float(np.mean(s[lab == 0])) if np.any(lab == 0) else c1
+                c2n = float(np.mean(s[lab == 1])) if np.any(lab == 1) else c2
+                if abs(c1n - c1) < 0.01 and abs(c2n - c2) < 0.01:
+                    c1, c2 = c1n, c2n
+                    break
+                c1, c2 = c1n, c2n
+
+            small_center = min(c1, c2)
+            big_center = max(c1, c2)
+            thr = float((small_center + big_center) / 2.0)
+            big = [r for r, ss in zip(rects, s) if float(ss) >= thr]
+            small = [r for r, ss in zip(rects, s) if float(ss) < thr]
+            dbg = {"method": "kmeans2_1d", "thr": thr, "centers": [small_center, big_center], "best_ratio": best_ratio}
+
+        if not small or not big:
+            thr2 = float(np.median(s))
+            big = [r for r, ss in zip(rects, s) if float(ss) >= thr2]
+            small = [r for r, ss in zip(rects, s) if float(ss) < thr2]
+            dbg["fallback"] = {"method": "median", "thr": thr2}
+
+        # safety: ensure big really bigger
+        if big and small:
+            mb = float(np.median([r.side_min for r in big]))
+            ms = float(np.median([r.side_min for r in small]))
+            if ms > mb:
+                big, small = small, big
+                dbg["swapped"] = True
+
+        return big, small, dbg
+
+    # ---------------------------
+    # Helpers: resize / coords / geometry
+    # ---------------------------
+    def _resize_to_ref_width(self, img_bgr: np.ndarray, ref_width: int) -> Tuple[np.ndarray, float, float]:
+        """
+        Downscale-only: если исходник уже меньше ref_width, НЕ увеличиваем.
+        Это важно для маленьких скринов: апскейл плодит артефакты и ломает split big/small.
+        """
+        h0, w0 = img_bgr.shape[:2]
+        ref_width = int(ref_width)
+
+        if ref_width <= 0:
+            return img_bgr.copy(), 1.0, 1.0
+
+        if w0 <= ref_width:
+            # no upscale
+            return img_bgr.copy(), 1.0, 1.0
+
+        target_w = int(ref_width)
+        target_h = int(round(h0 * (target_w / float(w0))))
+
+        interp = cv2.INTER_AREA  # downscale
+        img_small = cv2.resize(img_bgr, (target_w, target_h), interpolation=interp)
+
+        sx = target_w / float(w0)
+        sy = target_h / float(h0)
+        return img_small, float(sx), float(sy)
+
+    def _to_original_coords(self, rects_small: List[Rect], w0: int, h0: int, sx: float, sy: float) -> List[Rect]:
+        out: List[Rect] = []
+        for r in rects_small:
+            x = int(round(r.x / sx))
+            y = int(round(r.y / sy))
+            w = int(round(r.w / sx))
+            h = int(round(r.h / sy))
+            out.append(Rect(x, y, w, h))
+        return self.clip_rects(out, w0, h0)
+
+    def _tighten_rect_to_mask(self, binm01: np.ndarray, r: Rect) -> Optional[Rect]:
+        """
+        Ужать Rect до реальных белых пикселей (binm01 = 0/1) внутри него.
+        Возвращает новый Rect или None (если пикселей нет).
+        """
+        h, w = binm01.shape[:2]
+        x1 = max(0, min(w - 1, r.x))
+        y1 = max(0, min(h - 1, r.y))
+        x2 = max(x1 + 1, min(w, r.x2))
+        y2 = max(y1 + 1, min(h, r.y2))
+
+        roi = binm01[y1:y2, x1:x2]
+        ys, xs = np.where(roi > 0)
+        if xs.size == 0:
+            return None
+
+        xx1 = int(xs.min()) + x1
+        xx2 = int(xs.max()) + 1 + x1
+        yy1 = int(ys.min()) + y1
+        yy2 = int(ys.max()) + 1 + y1
+        return Rect(xx1, yy1, xx2 - xx1, yy2 - yy1)
+
+
+    def _squareize(self, r: Rect) -> Rect:
+        side = int(round(max(r.w, r.h)))
+        cx = r.x + r.w / 2.0
+        cy = r.y + r.h / 2.0
+        x2 = int(round(cx - side / 2.0))
+        y2 = int(round(cy - side / 2.0))
+        return Rect(x2, y2, side, side)
+
+    # ---------------------------
+    # Crops / clip
+    # ---------------------------
     def crop_rect(self, img_bgr: np.ndarray, r: Rect, pad: float = 0.0) -> np.ndarray:
-        """pad: доля от min(w,h), срезаем внутрь (чтобы не цеплять рамку/антиалиас)."""
         h, w = img_bgr.shape[:2]
         p = int(round(min(r.w, r.h) * pad))
 
@@ -319,117 +508,9 @@ class HoyolabParser:
         return out
 
     # ---------------------------
-    # Weapon dx calibration (IoU)
-    # ---------------------------
-    def _iou(self, a: Rect, b: Rect) -> float:
-        x1 = max(a.x, b.x)
-        y1 = max(a.y, b.y)
-        x2 = min(a.x2, b.x2)
-        y2 = min(a.y2, b.y2)
-        inter = max(0, x2 - x1) * max(0, y2 - y1)
-        if inter <= 0:
-            return 0.0
-        union = a.w * a.h + b.w * b.h - inter
-        return float(inter) / float(max(1, union))
-
-    def _find_best_white_bbox_in_window(self, mask_small: np.ndarray, win: Rect) -> Optional[Rect]:
-        """В окне win находим bbox самого большого белого объекта (обычно оружие)."""
-        h, w = mask_small.shape[:2]
-        x1 = max(0, min(w - 1, win.x))
-        y1 = max(0, min(h - 1, win.y))
-        x2 = max(x1 + 1, min(w, win.x2))
-        y2 = max(y1 + 1, min(h, win.y2))
-
-        roi = mask_small[y1:y2, x1:x2]
-        if roi.size == 0:
-            return None
-
-        contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None
-
-        best = None
-        best_area = -1
-        for c in contours:
-            xx, yy, ww, hh = cv2.boundingRect(c)
-            area = ww * hh
-            if area > best_area:
-                best_area = area
-                best = Rect(x1 + xx, y1 + yy, ww, hh)
-
-        return best
-
-    def calibrate_weapon_dx(self, char_squares: List[Rect], samples: int = 20) -> float:
-        """
-        Автоподбор dx (в долях ширины карточки) для оружия.
-        Находим dx, который даёт лучший IoU между ожидаемым weapon_rect и реальным белым bbox на маске.
-        """
-        mask_small = self._mask_for_cnt_small
-        scale = self._mask_scale
-        if mask_small is None or scale is None or not char_squares:
-            return 0.0
-
-        use = char_squares[: min(samples, len(char_squares))]
-
-        dx_candidates = np.linspace(-0.04, 0.04, 33)  # шаг ~0.0025
-        best_dx = 0.0
-        best_score = -1.0
-        scores_dump = []
-
-        for dx in dx_candidates:
-            ious = []
-
-            for cs in use:
-                card = self.estimate_card_from_char_square(cs)
-                wr = self.rect_from_rel(card, self.WEAP_X + float(dx), self.WEAP_Y, self.WEAP_W, self.WEAP_H)
-
-                # weapon rect -> small coords
-                wr_s = Rect(
-                    x=int(round(wr.x * scale)),
-                    y=int(round(wr.y * scale)),
-                    w=int(round(wr.w * scale)),
-                    h=int(round(wr.h * scale)),
-                )
-
-                # окно поиска вокруг ожидаемого оружия
-                pad_x = int(round(wr_s.w * 0.35))
-                pad_y = int(round(wr_s.h * 0.35))
-                win = Rect(wr_s.x - pad_x, wr_s.y - pad_y, wr_s.w + 2 * pad_x, wr_s.h + 2 * pad_y)
-
-                true_bbox = self._find_best_white_bbox_in_window(mask_small, win)
-                if true_bbox is None:
-                    continue
-
-                ious.append(self._iou(wr_s, true_bbox))
-
-            avg = float(np.mean(ious)) if ious else 0.0
-            scores_dump.append({"dx": float(dx), "score": avg})
-
-            if avg > best_score:
-                best_score = avg
-                best_dx = float(dx)
-
-        if self.debug:
-            with open(os.path.join(self.debug_dir, "weapon_dx_calibration.json"), "w", encoding="utf-8") as f:
-                json.dump(
-                    {"best_dx": best_dx, "best_score": best_score, "scores": scores_dump},
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-
-        # если улучшение микроскопическое — dx не нужен
-        score_at_0 = next((x["score"] for x in scores_dump if abs(x["dx"]) < 1e-9), None)
-        if score_at_0 is not None and (best_score - float(score_at_0)) < 0.01:
-            return 0.0
-
-        return best_dx
-
-    # ---------------------------
     # Sorting
     # ---------------------------
     def sort_rects_reading_order(self, rects: List[Rect]) -> List[Rect]:
-        """Сортировка в порядке чтения: сверху вниз, слева направо (устойчиво по строкам)."""
         if not rects:
             return []
 
@@ -443,7 +524,8 @@ class HoyolabParser:
         for r in rects:
             placed = False
             for row in rows:
-                if abs(r.cy - float(np.mean([x.cy for x in row]))) <= row_tol:
+                row_cy = float(np.mean([x.cy for x in row]))
+                if abs(r.cy - row_cy) <= row_tol:
                     row.append(r)
                     placed = True
                     break
@@ -459,60 +541,62 @@ class HoyolabParser:
     # ---------------------------
     # Debug
     # ---------------------------
-    def _dbg_save_overlay(self, img_bgr: np.ndarray, rects: List[Rect], name: str):
+    def _dbg_save_overlay(self, img_bgr: np.ndarray, rects: List[Rect], name: str, color=(0, 255, 0)):
         if not self.debug:
             return
         vis = img_bgr.copy()
         for i, r in enumerate(rects):
-            cv2.rectangle(vis, (r.x, r.y), (r.x2, r.y2), (0, 255, 0), 2)
+            cv2.rectangle(vis, (r.x, r.y), (r.x2, r.y2), color, 2)
             cv2.putText(
                 vis,
                 str(i),
                 (r.x + 4, r.y + 18),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
-                (0, 255, 0),
+                color,
                 2,
                 cv2.LINE_AA,
             )
         cv2.imwrite(os.path.join(self.debug_dir, name), vis)
 
-    def _dbg_overlay_pairs(self, img_bgr: np.ndarray, results: List[Dict[str, Any]], name: str):
+    def _dbg_overlay_two_sets(self, img_bgr: np.ndarray, big: List[Rect], small: List[Rect], name: str):
         if not self.debug:
             return
         vis = img_bgr.copy()
-        for item in results:
-            cs = item["char_square"]
-            cr = Rect(cs["x"], cs["y"], cs["w"], cs["h"])
-            cv2.rectangle(vis, (cr.x, cr.y), (cr.x2, cr.y2), (255, 0, 0), 2)  # char (blue)
-
-            card = item["estimated_card"]
-            rr = Rect(card["x"], card["y"], card["w"], card["h"])
-            cv2.rectangle(vis, (rr.x, rr.y), (rr.x2, rr.y2), (0, 255, 255), 2)  # card (yellow)
-
-            wr = item["weapon_rect"]
-            ww = Rect(wr["x"], wr["y"], wr["w"], wr["h"])
-            cv2.rectangle(vis, (ww.x, ww.y), (ww.x2, ww.y2), (0, 0, 255), 2)  # weapon (red)
-
+        for r in big:
+            cv2.rectangle(vis, (r.x, r.y), (r.x2, r.y2), (255, 0, 0), 2)  # blue
+        for r in small:
+            cv2.rectangle(vis, (r.x, r.y), (r.x2, r.y2), (0, 0, 255), 2)  # red
         cv2.imwrite(os.path.join(self.debug_dir, name), vis)
 
-    def write_debug_summary(self, char_squares: List[Rect], results: List[Dict[str, Any]]):
+    def write_debug_summary(
+        self,
+        big_squares: List[Rect],
+        small_squares: List[Rect],
+        chars: List[Dict[str, Any]],
+        weapons: List[Dict[str, Any]],
+    ):
         if not self.debug:
             return
+
         summary = {
             "image_path": self.image_path,
             "image_shape": list(self.image.shape[:2]),
             "ref_width": self.ref_width,
-            "char_squares_found": len(char_squares),
-            "results_count": len(results),
+            "big_squares_found": len(big_squares),
+            "small_squares_found": len(small_squares),
+            "characters_saved": len(chars),
+            "weapons_saved": len(weapons),
+            "mask_params": self._dbg_params,
             "notes": [
-                "00_small_with_thresholds.png: пороги сегментации и параметры морфологии",
+                "00_small_with_thresholds.png: пороги сегментации и параметры морфологии + scale_x/scale_y",
                 "04_icons_mask_inverted.png: белое = островки контента (иконки/текст) после инверта ui_mask",
-                "06_icons_mask_no_text.png: после морфологии (текст/шумы убраны, квадраты стабильнее)",
-                "char_squares_overlay_small.png: квадраты персонажей на уменьшенной картинке (debug)",
-                "char_squares_overlay_original.png: квадраты персонажей в оригинальных координатах",
-                "weapon_dx_calibration.json: подбор dx для оружия по IoU",
-                "pairs_overlay_original.png: синий=перс, жёлтый=карточка(оценка), красный=оружие",
+                "06_icons_mask_no_text.png: после морфологии (OPEN->CLOSE)",
+                "char_squares_overlay_small.png: big-квадраты на уменьшенной картинке",
+                "weapon_squares_overlay_small.png: small-квадраты на уменьшенной картинке",
+                "char_squares_overlay_original.png: big-квадраты в оригинальных координатах",
+                "weapon_squares_overlay_original.png: small-квадраты в оригинальных координатах",
+                "pairs_overlay_original.png: синий=персы, красный=оружие (независимые стеки)",
             ],
         }
         with open(os.path.join(self.debug_dir, "summary.json"), "w", encoding="utf-8") as f:
