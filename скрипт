@@ -1,75 +1,72 @@
+Контекст проекта
+- AbyssTracker (Python + PySide6). Парсер режет кропы HoYoLAB и сохраняет:
+  - персонажи: assets/characters/char_###.png
+  - оружие: assets/weapons/weapon_###.png
+- HD ассеты кладём в:
+  - assets/hd/characters/<id>.png
+  - assets/hd/weapons/<id>.png
+- База: data/characters.json и data/weapons.json (из репо AbyssTracker-data).
+- Кэш рефов Enka (уже скачан локально):
+  - cache/enka_ref_characters/<id>.png
+  - cache/enka_ref_weapons/<id>.png
 
+Что сделано и что работает
+1) ORB распознавание персонажей работает корректно:
+   - enrich_characters_orb(crops_char_dir="assets/characters", out_hd_dir="assets/hd/characters", debug_dir="debug/orb")
+   - создаёт debug/orb/report.json и debug/orb/accepted/..., rejected/...
+   - char_map собирается из report.json: {"char_000.png": "1000....", ...}
 
+2) Pairing персонаж↔оружие добавлен в HoyolabParser:
+   - parse() теперь возвращает {"characters","weapons","pairs"}
+   - pairs_lines.png в debug показывает линии корректно (пары валидные).
 
-🎮 Проект: AbyssTracker
+Текущее распознавание оружия (проблема)
+- В main_window.load_screenshot() после ORB для персонажей идёт phash-матчинг оружия:
+  - оружие матчим только если персонаж распознан (по pairs)
+  - weapon_type берём из data/characters.json по char_id
+  - rarity пытаемся определить по HSV из кропа (detect_weapon_rarity_from_crop)
+  - кандидаты фильтруем по (weapon_type, rarity) из data/weapons.json
+  - сравнение: pHash 64 (DCT pHash) с индексом cache/ref_index/weapons_phash_64.json,
+    матчинг по Hamming distance (match_weapon_crop_phash_filtered)
 
-Идея: десктопное приложение для сохранения и визуального сравнения забегов Витой Бездны в Genshin Impact.
+Лог после запуска:
+WEAPONS MATCH RESULT: {
+  'accepted_new_hd': 0,
+  'rejected': 12,
+  'skipped_no_char': 53,
+  'skipped_no_rarity': 2,
+  'skipped_no_candidates': 5,
+  'debug_dir': 'debug/phash_weapons'
+}
 
-Стек: Python + PySide6
+Интерпретация:
+- skipped_no_char=53: у многих пар персонаж НЕ распознан ORB → оружие вообще не пытаемся распознать.
+- rejected=12: где попытка была, но пороги MAX_DIST/MARGIN зарезали всё (accepted=0).
+- rarity иногда None (2), кандидатов нет (5) — нужно проверить правильность weapon_type/rarity в базе и детектор редкости.
 
-Фокус: UI > логика, визуальная компактность, минимум текста, аккуратный интерфейс.
+Что нужно сделать завтра (план)
+A) Починить skipped_no_char:
+   - выяснить, почему ORB не распознаёт часть персонажей (возможно score_threshold слишком высокий/мало данных в базе/кэш неполный).
+   - для теста временно понизить ORB пороги или логировать сколько accepted в report.json.
 
-Структура проекта:
+B) Сделать “до победного” матчинг оружия (как хотел пользователь), но безопасно:
+   - Сейчас есть MAX_DIST и MARGIN. Из-за них accepted=0.
+   - Нужно временно отключить margin и поднять MAX_DIST, но добавить debug:
+     сохранять в debug/phash_weapons/accepted кроп + ref + best_d + second_d + список top-5 кандидатов.
+   - Цель: увидеть реальные расстояния по правильным совпадениям и подобрать пороги.
 
-AbyssTracker/
-│
-├─ main.py
-├─ README.txt
-├─ state.json
-├─ runs_history.json
-│
-├─ assets/
-│  ├─ characters/
-│  └─ weapons/
-│
-├─ debug/
-│
-├─ models/
-│  └─ character.py
-│
-├─ parser/
-│  ├─ __init__.py
-│  └─ hoyolab_parser.py
-│
-└─ ui/
-   ├─ __init__.py
-   ├─ main_window.py
-   ├─ run_history_window.py
-   ├─ run_history_window_bkp.py
-   └─ widgets/
-      ├─ drag.py
-      ├─ drop.py
-      ├─ team.py
-      ├─ team_row.py       # текущая версия с QTimer и set_scale
-      ├─ run_card.py       # текущая версия с масштабированием
-      ├─ run_history_container.py
-      ├─ flow_layout.py
-      ├─ timers.py
-      └─ __init__.py
+C) Проверить rarity-filter:
+   - detect_weapon_rarity_from_crop использует HSV патч по центру.
+   - Нужно логировать для rejected/accepted: rar, Hm/Sm, weapon_type, кол-во candidates.
+   - Возможно фильтр слишком агрессивный: если rar=None → fallback на только type (не пропускать).
 
+D) Проверить consistency путей:
+   - кропы лежат в assets/characters и assets/weapons.
+   - clear_assets должен чистить именно эти папки + assets/hd/* + debug.
 
-Ключевые моменты логики:
-
-TeamSlot: персонаж + оружие + артефакт. Оружие — правый нижний угол, артефакт — левый нижний угол.
-
-TeamRow: массивы char_icons, weapon_icons, artifact_icons, floor_labels. Масштабирование через set_scale(). Позиции оружия и артефактов теперь корректно обновляются при первом открытии и повторном открытии окна истории.
-
-RunCard: хранит команды, финальный таймер, масштабируется через set_scale().
-
-RunHistoryWindow: FlowLayout, вертикальные линии через RunHistoryContainer, масштабирование Ctrl+Wheel (1.0–2.5×), прокрутка работает отдельно.
-
-FlowLayout: кастомный, без создания лишних виджетов.
-
-Баги, которые исправлены:
-
-Масштабирование Ctrl+Wheel корректно изменяет размер персонажей, оружия, артефактов и чисел.
-
-Повторное открытие окна истории не сбрасывает позиции оружия и артефактов.
-
-Вертикальные разделители всегда смещаются правильно при масштабировании.
-
-Первое отображение карточек корректное, числа и таймеры не искажаются.
-
-RunCard и TeamRow совместимы с текущей структурой данных.
-
-Текущее состояние: полностью рабочее, баги с позиционированием исправлены, масштабирование и vertical lines работают идеально.
+Файлы, которые я принесу в новый чат (если надо попросить у меня):
+- parser/hoyolab_parser.py (с pair_weapons_to_characters и return pairs)
+- services/icon_enricher_orb.py (ORB распознавание персонажей)
+- services/weapon_phash_matcher.py (build_weapon_phash_index, load_weapon_phash_index_bits, match_weapon_crop_phash_filtered, detect_weapon_rarity_from_crop)
+- ui/main_window.py (load_screenshot)
+- Пример содержимого debug/phash_weapons/accepted и rejected (несколько файлов) + report.json ORB.

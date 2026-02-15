@@ -1,7 +1,7 @@
 import os
 import shutil
 import json
-
+import cv2
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -17,14 +17,26 @@ from PySide6.QtWidgets import (
 	QSpinBox,
 )
 
+from services.weapon_phash_matcher import (
+    build_weapon_phash_index,
+    load_weapon_phash_index_bits,
+    match_weapon_crop_phash_filtered,
+    detect_weapon_rarity_from_crop,
+)
+from services.icon_enricher_orb import enrich_characters_orb, enrich_weapons_orb
+from services.data_updater import check_and_update
 from parser.hoyolab_parser import HoyolabParser
 from ui.run_history_window import RunHistoryWindow
 from ui.widgets.drag import DraggableIcon
 from ui.widgets.team import TeamSlot
 from ui.widgets.timers import AbyssFloorRow
 
-ASSETS_CHAR = "assets/characters"
-ASSETS_WEAP = "assets/weapons"
+CROPS_CHAR = "assets/characters"
+CROPS_WEAP = "assets/weapons"
+
+ASSETS_CHAR = "assets/hd/characters"
+ASSETS_WEAP = "assets/hd/weapons"
+
 STATE_FILE = "state.json"
 RUNS_FILE = "runs_history.json"
 
@@ -344,18 +356,229 @@ class App(QWidget):
 		)
 		if not path:
 			return
+
+		# 0) опционально: обновляем data (если у тебя это работает)
+		try:
+			check_and_update()
+		except Exception as e:
+			print("check_and_update failed:", e)
+
+		# 1) парсим скрин -> кропы сохранятся в assets/characters и assets/weapons
 		parser = HoyolabParser(path)
-		parser.parse()
+		parsed = parser.parse()  # {"characters","weapons","pairs"}
+
+		# 2) распознаём персонажей ORB -> создаст debug/orb/report.json и HD в assets/hd/characters
+		try:
+			res_chars = enrich_characters_orb(
+				crops_char_dir=CROPS_CHAR,  # assets/characters
+				data_dir="data",
+				out_hd_dir=ASSETS_CHAR,  # assets/hd/characters
+				debug_dir="debug/orb",
+				score_threshold=28,
+				margin=6,
+			)
+			print("ORB chars:", res_chars)
+		except Exception as e:
+			print("enrich_characters_orb failed:", e)
+
+		# 3) читаем report по персонажам: crop -> char_id
+		char_map = {}
+		try:
+			with open("debug/orb/report.json", "r", encoding="utf-8") as f:
+				rep = json.load(f)
+			for it in rep.get("accepted", []):
+				if "crop" in it and "id" in it:
+					char_map[str(it["crop"])] = str(it["id"])
+		except Exception as e:
+			print("Не удалось прочитать debug/orb/report.json:", e)
+
+		# если персонажи не распознаны — дальше оружие бессмысленно
+		if not char_map:
+			print("char_map пустой — оружие пропущено (нет распознанных персонажей).")
+			self.reload_characters()
+			self.reload_weapons()
+			return
+
+		# 4) грузим базы
+		try:
+			with open("data/characters.json", "r", encoding="utf-8") as f:
+				chars_db = json.load(f)
+			with open("data/weapons.json", "r", encoding="utf-8") as f:
+				weaps_db = json.load(f)
+		except Exception as e:
+			print("Не удалось загрузить data/*.json:", e)
+			return
+
+		# 5) строим/грузим pHash индекс оружия (если нет)
+		try:
+			build_weapon_phash_index(
+				data_dir="data",
+				cache_weapons_dir="cache/enka_ref_weapons",
+				out_ref_dir="cache/ref_icons/weapons_64",
+				out_index_path="cache/ref_index/weapons_phash_64.json",
+				size=64,
+				force=False,
+			)
+		except Exception as e:
+			print("build_weapon_phash_index failed:", e)
+
+		index_bits = load_weapon_phash_index_bits("cache/ref_index/weapons_phash_64.json")
+		if not index_bits:
+			print("Индекс оружия пуст — проверь cache/enka_ref_weapons и сборку индекса.")
+			return
+
+		# 6) кандидаты по (type, rarity)
+		type_rarity_to_ids = {}
+		for wid, meta in weaps_db.items():
+			t = meta.get("type")
+			r = meta.get("rarity")
+			if not t or r is None:
+				continue
+			key = (str(t), int(r))
+			type_rarity_to_ids.setdefault(key, []).append(str(wid))
+
+		# 7) debug папки для оружия (кроп + реф)
+		debug_dir = "debug/phash_weapons"
+		acc_dir = os.path.join(debug_dir, "accepted")
+		rej_dir = os.path.join(debug_dir, "rejected")
+		os.makedirs(acc_dir, exist_ok=True)
+		os.makedirs(rej_dir, exist_ok=True)
+
+		# 8) распознаём оружие по pairs + type+rarity
+		crops_weap_dir = CROPS_WEAP  # assets/weapons (кропы)
+		out_hd_weap_dir = ASSETS_WEAP  # assets/hd/weapons (показываем в UI)
+		os.makedirs(out_hd_weap_dir, exist_ok=True)
+
+		accepted = 0
+		rejected = 0
+		skipped_no_char = 0
+		skipped_no_rarity = 0
+		skipped_no_candidates = 0
+
+		MAX_DIST = 16
+		MARGIN = 3
+
+		pairs = parsed.get("pairs", [])
+		if not pairs:
+			print("pairs пустой — парсер не вернул пары. Оружие пропущено.")
+			self.reload_characters()
+			self.reload_weapons()
+			return
+
+		for pair in pairs:
+			ci = int(pair["char_index"])
+			wi = int(pair["weapon_index"])
+
+			char_crop_name = f"char_{ci:03d}.png"
+			weapon_crop_name = f"weapon_{wi:03d}.png"
+
+			# персонаж должен быть распознан
+			char_id = char_map.get(char_crop_name)
+			if not char_id:
+				skipped_no_char += 1
+				continue
+
+			weapon_type = chars_db.get(str(char_id), {}).get("weapon_type")
+			if not weapon_type:
+				skipped_no_char += 1
+				continue
+
+			crop_path = os.path.join(crops_weap_dir, weapon_crop_name)
+			crop_bgr = cv2.imread(crop_path, cv2.IMREAD_COLOR)
+			if crop_bgr is None:
+				continue
+
+			rar = detect_weapon_rarity_from_crop(crop_bgr)
+			if rar is None:
+				skipped_no_rarity += 1
+				# debug: кладём в rejected (rarity unknown)
+				try:
+					cv2.imwrite(os.path.join(rej_dir, f"{os.path.splitext(weapon_crop_name)[0]}__rar_none.png"),
+								crop_bgr)
+				except Exception:
+					pass
+				continue
+
+			candidates = type_rarity_to_ids.get((str(weapon_type), int(rar)), [])
+			if not candidates:
+				skipped_no_candidates += 1
+				continue
+
+			best_id, best_d, second_d = match_weapon_crop_phash_filtered(
+				crop_path=crop_path,
+				index_bits=index_bits,
+				candidate_ids=candidates,
+				size=64,
+			)
+
+			ok = (
+					best_id is not None
+					and best_d <= MAX_DIST
+					and (second_d - best_d) >= MARGIN
+			)
+
+			if not ok:
+				rejected += 1
+				# debug: сохраняем кроп с инфой
+				try:
+					name = f"{os.path.splitext(weapon_crop_name)[0]}__best_{best_id}__d_{best_d}__s_{second_d}__t_{weapon_type}__r_{rar}.png"
+					cv2.imwrite(os.path.join(rej_dir, name), crop_bgr)
+				except Exception:
+					pass
+				continue
+
+			# debug accepted: кроп + ref
+			try:
+				base = f"{os.path.splitext(weapon_crop_name)[0]}__id_{best_id}__d_{best_d}__t_{weapon_type}__r_{rar}"
+				cv2.imwrite(os.path.join(acc_dir, base + ".png"), crop_bgr)
+
+				ref_path = os.path.join("cache/enka_ref_weapons", f"{best_id}.png")
+				ref_bgr = cv2.imread(ref_path, cv2.IMREAD_UNCHANGED)
+				if ref_bgr is not None:
+					# сохраняем как есть (может быть с альфой)
+					cv2.imwrite(os.path.join(acc_dir, base + "__ref.png"), ref_bgr)
+			except Exception:
+				pass
+
+			# сохраняем HD (уникально)
+			src = os.path.join("cache/enka_ref_weapons", f"{best_id}.png")
+			dst = os.path.join(out_hd_weap_dir, f"{best_id}.png")
+			if os.path.exists(src) and not os.path.exists(dst):
+				try:
+					shutil.copyfile(src, dst)
+					accepted += 1
+				except Exception:
+					pass
+
+		print("WEAPONS MATCH RESULT:", {
+			"accepted_new_hd": accepted,
+			"rejected": rejected,
+			"skipped_no_char": skipped_no_char,
+			"skipped_no_rarity": skipped_no_rarity,
+			"skipped_no_candidates": skipped_no_candidates,
+			"debug_dir": debug_dir,
+		})
+
+		# 9) обновляем UI
 		self.reload_characters()
 		self.reload_weapons()
 
 	def clear_assets(self):
-		for folder in [ASSETS_CHAR, ASSETS_WEAP]:
+		folders_to_clear = [
+			"assets/characters",  # КРОПЫ персонажей
+			"assets/weapons",  # КРОПЫ оружия
+			"assets/hd/characters",
+			"assets/hd/weapons",
+			"debug",
+		]
+
+		for folder in folders_to_clear:
 			shutil.rmtree(folder, ignore_errors=True)
 			os.makedirs(folder, exist_ok=True)
+
 		self.reload_characters()
 		self.reload_weapons()
-		QMessageBox.information(self, "Готово", "Ассеты очищены")
+		QMessageBox.information(self, "Готово", "Кропы/HD/дебаг очищены")
 
 	def reset_run(self):
 		# Сбрасываем таймеры до 10:00

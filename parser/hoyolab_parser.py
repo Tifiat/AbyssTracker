@@ -107,7 +107,25 @@ class HoyolabParser:
             self._dbg_overlay_two_sets(img, big_squares, small_squares, name="pairs_overlay_original.png")
             self.write_debug_summary(big_squares, small_squares, chars_out, weaps_out)
 
-        return {"characters": chars_out, "weapons": weaps_out}
+        pairs = self.pair_weapons_to_characters(chars_out, weaps_out)
+
+        if self.debug:
+            try:
+                vis = img.copy()
+                # быстрые словари: index -> Rect
+                char_rects = {c["index"]: Rect(**c["rect"]) for c in chars_out}
+                weap_rects = {w["index"]: Rect(**w["rect"]) for w in weaps_out}
+                for p in pairs:
+                    cr = char_rects.get(p["char_index"])
+                    wr = weap_rects.get(p["weapon_index"])
+                    if not cr or not wr:
+                        continue
+                    cv2.line(vis, (int(cr.cx), int(cr.cy)), (int(wr.cx), int(wr.cy)), (0, 255, 255), 2)
+                cv2.imwrite(os.path.join(self.debug_dir, "pairs_lines.png"), vis)
+            except Exception:
+                pass
+
+        return {"characters": chars_out, "weapons": weaps_out, "pairs": pairs}
 
     # ---------------------------
     # Detect icon squares (big+small)
@@ -537,6 +555,66 @@ class HoyolabParser:
 
         rows.sort(key=lambda row: float(np.mean([r.cy for r in row])))
         return [r for row in rows for r in row]
+
+    def pair_weapons_to_characters(self, chars_out, weaps_out):
+        """
+        Возвращает список пар {char_index, weapon_index}.
+        Pairing устойчив к тому, что оружие иногда "съезжает".
+        """
+        # восстановим Rect'ы
+        chars = []
+        for c in chars_out:
+            r = c["rect"]
+            chars.append((c["index"], Rect(r["x"], r["y"], r["w"], r["h"])))
+
+        weaps = []
+        for w in weaps_out:
+            r = w["rect"]
+            weaps.append((w["index"], Rect(r["x"], r["y"], r["w"], r["h"])))
+
+        pairs = []
+        used_chars = set()
+
+        # медианная высота персонажа как масштаб для допусков
+        if not chars or not weaps:
+            return pairs
+        h_med = float(np.median([r.h for _, r in chars]))
+        row_tol = h_med * 0.70  # допуск "в одной строке"
+        prefer_right = h_med * 0.40  # мягкий штраф, если оружие сильно слева
+
+        for w_idx, wr in weaps:
+            best = None
+            best_cost = 1e18
+
+            for c_idx, cr in chars:
+                if c_idx in used_chars:
+                    continue
+
+                # 1) должны быть примерно на одной высоте
+                if abs(wr.cy - cr.cy) > row_tol:
+                    continue
+
+                dx = wr.cx - cr.cx
+                dy = wr.cy - cr.cy
+
+                dist = (dx * dx + (dy * dy) * 1.2) ** 0.5
+
+                # 2) штраф если оружие сильно слева от перса (но не запрещаем)
+                penalty = 0.0
+                if dx < -prefer_right:
+                    penalty = abs(dx) * 0.6
+
+                cost = dist + penalty
+
+                if cost < best_cost:
+                    best_cost = cost
+                    best = c_idx
+
+            if best is not None:
+                pairs.append({"char_index": best, "weapon_index": w_idx})
+                used_chars.add(best)
+
+        return pairs
 
     # ---------------------------
     # Debug
