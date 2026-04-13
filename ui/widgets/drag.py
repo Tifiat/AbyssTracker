@@ -1,22 +1,49 @@
-import os  # ДОБАВИТЬ этот импорт
-from PySide6.QtWidgets import QLabel, QMessageBox, QApplication  # ДОБАВИТЬ QMessageBox, QApplication
+import os
+from PySide6.QtWidgets import QLabel, QMessageBox, QApplication
 from PySide6.QtGui import QPixmap, QDrag
-from PySide6.QtCore import Qt, QMimeData
+from PySide6.QtCore import Qt, QMimeData, QEvent, QTimer
 
 
 class DraggableIcon(QLabel):
 	def __init__(self, image_path, size):
 		super().__init__()
 		self.image_path = image_path
+		self.base_size = size
+		self._src_pixmap = QPixmap(image_path)
 
-		pixmap = QPixmap(image_path).scaled(
-			size, size,
+		self.setFixedSize(size, size)
+		self.setCursor(Qt.OpenHandCursor)
+		self._update_pixmap()
+		QTimer.singleShot(0, self._update_pixmap)
+
+	def _update_pixmap(self):
+		"""Пересобрать pixmap с учетом текущего DPI экрана."""
+		if self._src_pixmap.isNull():
+			self.clear()
+			return
+
+		dpr = self.devicePixelRatioF()
+		target_px = max(1, int(self.base_size * dpr))
+
+		pixmap = self._src_pixmap.scaled(
+			target_px,
+			target_px,
 			Qt.KeepAspectRatio,
 			Qt.SmoothTransformation
 		)
+		pixmap.setDevicePixelRatio(dpr)
 		self.setPixmap(pixmap)
-		self.setFixedSize(size, size)
-		self.setCursor(Qt.OpenHandCursor)
+
+	def event(self, event):
+		"""Обновлять pixmap при смене экрана / DPI / размера."""
+		if event.type() in (
+			QEvent.Type.DevicePixelRatioChange,
+			QEvent.Type.ScreenChangeInternal,
+			QEvent.Type.Resize,
+			QEvent.Type.Show,
+		):
+			self._update_pixmap()
+		return super().event(event)
 
 	def mousePressEvent(self, event):
 		if event.button() == Qt.LeftButton:
@@ -25,7 +52,8 @@ class DraggableIcon(QLabel):
 			mime = QMimeData()
 			mime.setText(self.image_path)
 			drag.setMimeData(mime)
-			drag.setPixmap(self.pixmap())
+			if self.pixmap() is not None:
+				drag.setPixmap(self.pixmap())
 			drag.exec(Qt.CopyAction)
 
 		elif event.button() == Qt.RightButton:
@@ -40,8 +68,11 @@ class DraggableIcon(QLabel):
 
 		# Проверяем, что файл в папке assets (безопасность)
 		if not self._is_in_assets_folder(self.image_path):
-			QMessageBox.warning(self, "Ошибка",
-			                    "Можно удалять только файлы из папки assets!")
+			QMessageBox.warning(
+				self,
+				"Ошибка",
+				"Можно удалять только файлы из папки assets!"
+			)
 			return
 
 		# Проверяем зажат ли Ctrl
@@ -68,12 +99,12 @@ class DraggableIcon(QLabel):
 			# Всегда одно и то же уведомление
 			self._notify_parent_to_update_grids()
 
-
 		except Exception as e:
-
-			QMessageBox.warning(self, "Ошибка",
-
-			                    f"Не удалось удалить файл:\n{str(e)}")
+			QMessageBox.warning(
+				self,
+				"Ошибка",
+				f"Не удалось удалить файл:\n{str(e)}"
+			)
 
 	def _is_in_assets_folder(self, filepath):
 		"""Проверяем, что файл находится в папке assets"""
@@ -81,7 +112,9 @@ class DraggableIcon(QLabel):
 			abs_path = os.path.abspath(filepath)
 			assets_dirs = [
 				os.path.abspath("assets/characters"),
-				os.path.abspath("assets/weapons")
+				os.path.abspath("assets/weapons"),
+				os.path.abspath("assets/hd/characters"),
+				os.path.abspath("assets/hd/weapons"),
 			]
 
 			# Проверяем, что файл находится в одной из папок assets
@@ -89,7 +122,7 @@ class DraggableIcon(QLabel):
 				if abs_path.startswith(assets_dir + os.sep):
 					return True
 			return False
-		except:
+		except Exception:
 			return False
 
 	def _notify_parent_to_update_grids(self):
@@ -97,12 +130,10 @@ class DraggableIcon(QLabel):
 		widget = self.parent()
 		while widget:
 			if hasattr(widget, 'safe_update_grids'):
-				# Используем безопасное обновление
 				from PySide6.QtCore import QTimer
 				QTimer.singleShot(50, widget.safe_update_grids)
 				break
 			elif hasattr(widget, 'update_grids'):
-				# Резервный вариант (старый код)
 				from PySide6.QtCore import QTimer
 				QTimer.singleShot(50, widget.update_grids)
 				break
