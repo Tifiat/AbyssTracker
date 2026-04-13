@@ -59,7 +59,6 @@ class RunCard(QWidget):
             QLabel {
                 border:1px solid #777;
                 background:#111;
-                font-size:15px;
                 font-weight:bold;
             }
         """)
