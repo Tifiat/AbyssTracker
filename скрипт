@@ -1,72 +1,282 @@
-Контекст проекта
-- AbyssTracker (Python + PySide6). Парсер режет кропы HoYoLAB и сохраняет:
-  - персонажи: assets/characters/char_###.png
-  - оружие: assets/weapons/weapon_###.png
-- HD ассеты кладём в:
-  - assets/hd/characters/<id>.png
-  - assets/hd/weapons/<id>.png
-- База: data/characters.json и data/weapons.json (из репо AbyssTracker-data).
-- Кэш рефов Enka (уже скачан локально):
-  - cache/enka_ref_characters/<id>.png
-  - cache/enka_ref_weapons/<id>.png
+AbyssTracker — актуальный контекст проекта
+Общая цель
 
-Что сделано и что работает
-1) ORB распознавание персонажей работает корректно:
-   - enrich_characters_orb(crops_char_dir="assets/characters", out_hd_dir="assets/hd/characters", debug_dir="debug/orb")
-   - создаёт debug/orb/report.json и debug/orb/accepted/..., rejected/...
-   - char_map собирается из report.json: {"char_000.png": "1000....", ...}
+Python + PySide6 desktop app:
 
-2) Pairing персонаж↔оружие добавлен в HoyolabParser:
-   - parse() теперь возвращает {"characters","weapons","pairs"}
-   - pairs_lines.png в debug показывает линии корректно (пары валидные).
+загружает скриншот HoYoLAB
+режет иконки персонажей и оружия
+распознаёт их
+показывает команды и таймеры бездны
+Архитектура
+Основные файлы
+parser/hoyolab_parser.py — режет скриншот на кропы и возвращает pairs
+services/icon_enricher_orb.py — ORB для персонажей, плюс загрузка Enka refs
+services/weapon_phash_matcher.py — старый мёртвый pHash pipeline
+services/weapon_matcher.py — новый backend оружия
+services/data_updater.py — качает data/*.json
+ui/main_window.py — главный pipeline + UI
+Генерируемые папки
+assets/characters
+assets/weapons
+assets/hd/characters
+assets/hd/weapons
+cache/enka_ref_characters
+cache/enka_ref_weapons
+cache/ref_index
+debug/orb
+debug/weapons
+Что уже точно работает
+Parser
 
-Текущее распознавание оружия (проблема)
-- В main_window.load_screenshot() после ORB для персонажей идёт phash-матчинг оружия:
-  - оружие матчим только если персонаж распознан (по pairs)
-  - weapon_type берём из data/characters.json по char_id
-  - rarity пытаемся определить по HSV из кропа (detect_weapon_rarity_from_crop)
-  - кандидаты фильтруем по (weapon_type, rarity) из data/weapons.json
-  - сравнение: pHash 64 (DCT pHash) с индексом cache/ref_index/weapons_phash_64.json,
-    матчинг по Hamming distance (match_weapon_crop_phash_filtered)
+HoyolabParser.parse() возвращает:
 
-Лог после запуска:
-WEAPONS MATCH RESULT: {
-  'accepted_new_hd': 0,
-  'rejected': 12,
-  'skipped_no_char': 53,
-  'skipped_no_rarity': 2,
-  'skipped_no_candidates': 5,
-  'debug_dir': 'debug/phash_weapons'
+{
+  "characters": [...],
+  "weapons": [...],
+  "pairs": [
+    {"char_index": int, "weapon_index": int}
+  ]
 }
 
-Интерпретация:
-- skipped_no_char=53: у многих пар персонаж НЕ распознан ORB → оружие вообще не пытаемся распознать.
-- rejected=12: где попытка была, но пороги MAX_DIST/MARGIN зарезали всё (accepted=0).
-- rarity иногда None (2), кандидатов нет (5) — нужно проверить правильность weapon_type/rarity в базе и детектор редкости.
+Важно:
 
-Что нужно сделать завтра (план)
-A) Починить skipped_no_char:
-   - выяснить, почему ORB не распознаёт часть персонажей (возможно score_threshold слишком высокий/мало данных в базе/кэш неполный).
-   - для теста временно понизить ORB пороги или логировать сколько accepted в report.json.
+pairing уже корректный
+char_index -> char_###.png
+weapon_index -> weapon_###.png
+Characters
 
-B) Сделать “до победного” матчинг оружия (как хотел пользователь), но безопасно:
-   - Сейчас есть MAX_DIST и MARGIN. Из-за них accepted=0.
-   - Нужно временно отключить margin и поднять MAX_DIST, но добавить debug:
-     сохранять в debug/phash_weapons/accepted кроп + ref + best_d + second_d + список top-5 кандидатов.
-   - Цель: увидеть реальные расстояния по правильным совпадениям и подобрать пороги.
+enrich_characters_orb(...) работает.
 
-C) Проверить rarity-filter:
-   - detect_weapon_rarity_from_crop использует HSV патч по центру.
-   - Нужно логировать для rejected/accepted: rar, Hm/Sm, weapon_type, кол-во candidates.
-   - Возможно фильтр слишком агрессивный: если rar=None → fallback на только type (не пропускать).
+Он:
 
-D) Проверить consistency путей:
-   - кропы лежат в assets/characters и assets/weapons.
-   - clear_assets должен чистить именно эти папки + assets/hd/* + debug.
+матчится по ORB
+качает Enka refs персонажей при необходимости
+кладёт refs в cache/enka_ref_characters/<id>.png
+кладёт HD иконки в assets/hd/characters/<id>.png
+пишет debug в debug/orb/report.json
 
-Файлы, которые я принесу в новый чат (если надо попросить у меня):
-- parser/hoyolab_parser.py (с pair_weapons_to_characters и return pairs)
-- services/icon_enricher_orb.py (ORB распознавание персонажей)
-- services/weapon_phash_matcher.py (build_weapon_phash_index, load_weapon_phash_index_bits, match_weapon_crop_phash_filtered, detect_weapon_rarity_from_crop)
-- ui/main_window.py (load_screenshot)
-- Пример содержимого debug/phash_weapons/accepted и rejected (несколько файлов) + report.json ORB.
+Из debug/orb/report.json в main_window.py строится:
+
+char_map = {
+  "char_000.png": "10000106"
+}
+Что признано мёртвым
+
+Старый weapon backend в services/weapon_phash_matcher.py:
+
+pHash
+Hamming
+MAX_DIST / MARGIN
+рендер ref на фон по rarity
+
+Это не работает как основной подход, потому что:
+
+Enka ref ≠ in-game crop
+это cross-domain matching
+
+pHash больше не развивать.
+
+Что уже сделано по weapon backend
+
+Создан новый файл:
+
+services/weapon_matcher.py
+
+ui/main_window.py уже переведён на:
+
+from services.weapon_matcher import match_weapons
+
+Весь старый pHash-блок из load_screenshot() удалён.
+
+Важный найденный факт про refs
+
+Downloader Enka refs уже был в проекте.
+
+Файл:
+
+services/icon_enricher_orb.py
+
+Ключевое место:
+
+OrbIndex._load_ref_image_bgr()
+
+Там:
+
+url = f"{ENKA_UI}/{icon_name}.png"
+
+То есть refs персонажей и оружия реально качаются с Enka.
+
+Что было добавлено
+
+В services/icon_enricher_orb.py добавлена функция:
+
+def warmup_weapon_cache(...):
+    ...
+
+Она:
+
+читает data/weapons.json
+скачивает отсутствующие cache/enka_ref_weapons/<id>.png
+не матчится
+не трогает уже скачанные png
+
+Это уже отработало успешно:
+
+cache/enka_ref_weapons заполнен
+Что выяснилось по rarity
+
+detect_weapon_rarity_from_crop() уже переписан.
+
+Сейчас:
+
+в целом редкость определяется заметно лучше
+но иногда 1★ swords путаются с 2★
+
+Практический вывод:
+
+1★ / 2★ можно вообще скипать
+основной интерес: 3★ / 4★ / 5★
+Что уже проверено по baseline matcher
+
+Был временный baseline edge/mask/patch/color.
+
+Итог:
+
+с мягкими порогами давал ложные accept
+с жёсткими порогами дал 0 accepted
+
+Вывод:
+
+baseline как основной matcher слабый
+идти дальше надо через embedding retrieval
+Что сейчас внедряется
+
+Новый план для оружия:
+
+Не делать:
+on-the-fly DINO для каждого кандидата и каждого view
+Делать:
+один раз строить embedding index на диск
+потом матчить crop по готовому индексу
+Новый pipeline оружия
+Stage 0
+
+Оставить:
+
+parser
+pairing
+char_map
+weapon_type
+rarity detector
+Stage 1
+
+Candidate narrowing:
+
+по weapon_type
+по rarity, если она уверенно определилась
+Stage 2
+
+Embedding retrieval:
+
+DINOv2 embedding для crop
+retrieval top-N по готовому индексу refs
+Stage 3
+
+Local rerank:
+
+только среди top-N
+можно оставить текущий local score как rerank
+Stage 4
+
+Reject:
+
+top1 < T → reject
+(top1 - top2) < margin → reject
+Что уже частично добавлено в services/weapon_matcher.py
+
+Добавлены или начали добавляться:
+
+_get_dino()
+_encode_bgr_dino()
+_make_ref_views()
+build_weapon_embedding_index()
+load_weapon_embedding_index()
+retrieve_top_candidates()
+новый match_weapon_crop(..., emb_index=...)
+Важный текущий блокер
+HF Hub
+
+При создании модели через:
+
+timm.create_model("vit_base_patch14_dinov2.lvd142m", pretrained=True, num_classes=0)
+
+timm может скачать pretrained weights с Hugging Face Hub.
+
+В логах уже был warning:
+
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Это значит:
+
+DINO retrieval сейчас имеет внешнюю сетевую зависимость
+warning сам по себе не фатальный
+но первый запуск может быть медленным
+если HF недоступен, загрузка модели может стать блокером
+
+Это обязательно учитывать дальше.
+
+Что уже видно по логам
+
+Последний важный лог:
+
+ORB chars: {'characters_saved_hd': 70, 'debug_report': '...debug/orb/report.json'}
+WEAPON CACHE WARMUP: {'total': 233, 'downloaded': 0, 'skipped_exists': 233, 'skipped_no_icon': 0, 'failed': 0, ...}
+[INDEX] 0/233
+   ↳ weapon 11101 views: 7
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+То есть:
+
+ORB characters ок
+weapon cache warmup ок
+build weapon embedding index стартовал
+модель DINO начала тянуться через HF/timm
+процесс ещё не доведён до завершения
+Что в weapon_matcher.py надо дочистить
+
+Сейчас там смешались 2 версии логики:
+
+Старая промежуточная
+_REF_EMB_CACHE
+_get_ref_embeddings()
+on-the-fly ref embeddings
+Новая целевая
+weapons_dino_index.npz
+build_weapon_embedding_index()
+load_weapon_embedding_index()
+retrieve_top_candidates()
+
+Нужно оставить только вторую.
+
+То есть удалить:
+
+_REF_EMB_CACHE
+_get_ref_embeddings()
+остатки on-the-fly retrieval
+Что должно быть следующим шагом
+
+Не возвращаться к pHash и не крутить baseline.
+
+Следующий шаг:
+
+дочистить services/weapon_matcher.py
+довести до конца сборку cache/ref_index/weapons_dino_index.npz
+потом проверить:
+WEAPON EMB INDEX: ...
+WEAPONS MATCH RESULT: ...
+Критичные требования пользователя
+не придумывать код без полного релевантного кода
+сначала разбирать текущую логику
+не писать полный файл вслепую, если нет уверенности
+отвечать коротко, без воды
+если контекста не хватает, сначала запрашивать код

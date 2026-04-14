@@ -16,13 +16,8 @@ from PySide6.QtWidgets import (
 	QMessageBox,
 )
 
-from services.weapon_phash_matcher import (
-	build_weapon_phash_index,
-	load_weapon_phash_index_bits,
-	match_weapon_crop_phash_filtered,
-	detect_weapon_rarity_from_crop,
-)
-from services.icon_enricher_orb import enrich_characters_orb
+from services.weapon_matcher import match_weapons
+from services.icon_enricher_orb import enrich_characters_orb, warmup_weapon_cache
 from services.data_updater import check_and_update
 from parser.hoyolab_parser import HoyolabParser
 from ui.run_history_window import RunHistoryWindow
@@ -396,153 +391,29 @@ class App(QWidget):
 			return
 
 		try:
-			build_weapon_phash_index(
+			res_cache = warmup_weapon_cache(
 				data_dir="data",
-				cache_weapons_dir="cache/enka_ref_weapons",
-				out_ref_dir="cache/ref_icons/weapons_64",
-				out_index_path="cache/ref_index/weapons_phash_64.json",
-				size=64,
-				force=False,
+				cache_dir="cache/enka_ref_weapons",
+				allow_download=True,
 			)
+			print("WEAPON CACHE WARMUP:", res_cache)
 		except Exception as e:
-			print("build_weapon_phash_index failed:", e)
+			print("warmup_weapon_cache failed:", e)
 
-		index_bits = load_weapon_phash_index_bits("cache/ref_index/weapons_phash_64.json")
-		if not index_bits:
-			print("Индекс оружия пуст — проверь cache/enka_ref_weapons и сборку индекса.")
-			self._refresh_ui_after_parse()
-			return
-
-		type_rarity_to_ids = {}
-		for wid, meta in weaps_db.items():
-			t = meta.get("type")
-			r = meta.get("rarity")
-			if not t or r is None:
-				continue
-			key = (str(t), int(r))
-			type_rarity_to_ids.setdefault(key, []).append(str(wid))
-
-		debug_dir = "debug/phash_weapons"
-		acc_dir = os.path.join(debug_dir, "accepted")
-		rej_dir = os.path.join(debug_dir, "rejected")
-		os.makedirs(acc_dir, exist_ok=True)
-		os.makedirs(rej_dir, exist_ok=True)
-
-		crops_weap_dir = CROPS_WEAP
-		out_hd_weap_dir = ASSETS_WEAP
-		os.makedirs(out_hd_weap_dir, exist_ok=True)
-
-		accepted = 0
-		rejected = 0
-		skipped_no_char = 0
-		skipped_no_rarity = 0
-		skipped_no_candidates = 0
-
-		MAX_DIST = 16
-		MARGIN = 3
-
-		pairs = parsed.get("pairs", [])
-		if not pairs:
-			print("pairs пустой — парсер не вернул пары. Оружие пропущено.")
-			self._refresh_ui_after_parse()
-			return
-
-		for pair in pairs:
-			ci = int(pair["char_index"])
-			wi = int(pair["weapon_index"])
-
-			char_crop_name = f"char_{ci:03d}.png"
-			weapon_crop_name = f"weapon_{wi:03d}.png"
-
-			char_id = char_map.get(char_crop_name)
-			if not char_id:
-				skipped_no_char += 1
-				continue
-
-			weapon_type = chars_db.get(str(char_id), {}).get("weapon_type")
-			if not weapon_type:
-				skipped_no_char += 1
-				continue
-
-			crop_path = os.path.join(crops_weap_dir, weapon_crop_name)
-			crop_bgr = cv2.imread(crop_path, cv2.IMREAD_COLOR)
-			if crop_bgr is None:
-				continue
-
-			rar = detect_weapon_rarity_from_crop(crop_bgr)
-			if rar is None:
-				skipped_no_rarity += 1
-				try:
-					cv2.imwrite(
-						os.path.join(rej_dir, f"{os.path.splitext(weapon_crop_name)[0]}__rar_none.png"),
-						crop_bgr,
-					)
-				except Exception:
-					pass
-				continue
-
-			candidates = type_rarity_to_ids.get((str(weapon_type), int(rar)), [])
-			if not candidates:
-				skipped_no_candidates += 1
-				continue
-
-			best_id, best_d, second_d = match_weapon_crop_phash_filtered(
-				crop_path=crop_path,
-				index_bits=index_bits,
-				candidate_ids=candidates,
-				size=64,
+		try:
+			res_weapons = match_weapons(
+				parsed=parsed,
+				char_map=char_map,
+				chars_db=chars_db,
+				weaps_db=weaps_db,
+				crops_weap_dir=CROPS_WEAP,
+				out_hd_weap_dir=ASSETS_WEAP,
+				cache_weapons_dir="cache/enka_ref_weapons",
+				debug_dir="debug/weapons",
 			)
-
-			ok = (
-				best_id is not None
-				and best_d <= MAX_DIST
-				and (second_d - best_d) >= MARGIN
-			)
-
-			if not ok:
-				rejected += 1
-				try:
-					name = (
-						f"{os.path.splitext(weapon_crop_name)[0]}"
-						f"__best_{best_id}__d_{best_d}__s_{second_d}"
-						f"__t_{weapon_type}__r_{rar}.png"
-					)
-					cv2.imwrite(os.path.join(rej_dir, name), crop_bgr)
-				except Exception:
-					pass
-				continue
-
-			try:
-				base = (
-					f"{os.path.splitext(weapon_crop_name)[0]}"
-					f"__id_{best_id}__d_{best_d}__t_{weapon_type}__r_{rar}"
-				)
-				cv2.imwrite(os.path.join(acc_dir, base + ".png"), crop_bgr)
-
-				ref_path = os.path.join("cache/enka_ref_weapons", f"{best_id}.png")
-				ref_bgr = cv2.imread(ref_path, cv2.IMREAD_UNCHANGED)
-				if ref_bgr is not None:
-					cv2.imwrite(os.path.join(acc_dir, base + "__ref.png"), ref_bgr)
-			except Exception:
-				pass
-
-			src = os.path.join("cache/enka_ref_weapons", f"{best_id}.png")
-			dst = os.path.join(out_hd_weap_dir, f"{best_id}.png")
-			if os.path.exists(src) and not os.path.exists(dst):
-				try:
-					shutil.copyfile(src, dst)
-					accepted += 1
-				except Exception:
-					pass
-
-		print("WEAPONS MATCH RESULT:", {
-			"accepted_new_hd": accepted,
-			"rejected": rejected,
-			"skipped_no_char": skipped_no_char,
-			"skipped_no_rarity": skipped_no_rarity,
-			"skipped_no_candidates": skipped_no_candidates,
-			"debug_dir": debug_dir,
-		})
+			print("WEAPONS MATCH RESULT:", res_weapons)
+		except Exception as e:
+			print("match_weapons failed:", e)
 
 		self._refresh_ui_after_parse()
 

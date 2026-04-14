@@ -484,3 +484,56 @@ def enrich_weapons_orb(
 
     return {"weapons_saved_hd": saved_hd, "debug_report": os.path.join(debug_dir, "report.json")}
 
+def warmup_weapon_cache(
+    data_dir: str = "data",
+    cache_dir: str = "cache/enka_ref_weapons",
+    allow_download: bool = True,
+) -> dict:
+    weapons = _load_json(_p(data_dir, "weapons.json"))
+    cache_dir = _p(cache_dir)
+    _ensure_dir(cache_dir)
+
+    downloaded = 0
+    skipped_exists = 0
+    skipped_no_icon = 0
+    failed = 0
+
+    for wid, meta in weapons.items():
+        icon_name = meta.get("icon_name")
+        if not icon_name:
+            skipped_no_icon += 1
+            continue
+
+        local_path = os.path.join(cache_dir, f"{wid}.png")
+        if os.path.exists(local_path):
+            skipped_exists += 1
+            continue
+
+        if not allow_download:
+            failed += 1
+            continue
+
+        url = f"{ENKA_UI}/{icon_name}.png"
+        try:
+            png = _download_png(url)
+
+            img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_UNCHANGED)
+            if img is None:
+                failed += 1
+                continue
+
+            with open(local_path, "wb") as f:
+                f.write(png)
+
+            downloaded += 1
+        except Exception:
+            failed += 1
+
+    return {
+        "total": len(weapons),
+        "downloaded": downloaded,
+        "skipped_exists": skipped_exists,
+        "skipped_no_icon": skipped_no_icon,
+        "failed": failed,
+        "cache_dir": cache_dir,
+    }

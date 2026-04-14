@@ -202,55 +202,6 @@ def match_weapon_crop_phash_filtered(
 
     return best_id, best, second
 
-
-def detect_weapon_rarity_from_crop(crop_bgr: np.ndarray) -> int | None:
-    h, w = crop_bgr.shape[:2]
-    if h < 10 or w < 10:
-        return None
-
-    p = int(min(h, w) * 0.18)
-    if p > 0 and h - 2 * p >= 10 and w - 2 * p >= 10:
-        img = crop_bgr[p:h - p, p:w - p]
-    else:
-        img = crop_bgr
-
-    hh, ww = img.shape[:2]
-    y1, y2 = int(hh * 0.25), int(hh * 0.45)
-    x1, x2 = int(ww * 0.25), int(ww * 0.45)
-    patch = img[y1:y2, x1:x2]
-    if patch.size == 0:
-        return None
-
-    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-    H = hsv[:, :, 0]
-    S = hsv[:, :, 1]
-    V = hsv[:, :, 2]
-
-    mask = V > 30
-    if np.count_nonzero(mask) < 10:
-        return None
-
-    Hm = float(np.median(H[mask]))
-    Sm = float(np.median(S[mask]))
-
-    if Sm < 35:
-        return 1
-
-    if 10 <= Hm <= 40 and Sm > 80:
-        return 5
-
-    if 125 <= Hm <= 170:
-        return 4
-
-    if 90 <= Hm < 125:
-        return 3
-
-    if 40 <= Hm < 90:
-        return 2
-
-    return None
-
-
 def copy_weapon_hd_from_cache(best_id: str, out_hd_weap_dir: str = "assets/hd/weapons", cache_dir: str = "cache/enka_ref_weapons") -> bool:
     src = _p(cache_dir, f"{best_id}.png")
     dst = _p(out_hd_weap_dir, f"{best_id}.png")
