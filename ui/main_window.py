@@ -2,8 +2,8 @@ import os
 import shutil
 import json
 import cv2
+
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
 	QWidget,
 	QLabel,
@@ -14,16 +14,15 @@ from PySide6.QtWidgets import (
 	QScrollArea,
 	QFileDialog,
 	QMessageBox,
-	QSpinBox,
 )
 
 from services.weapon_phash_matcher import (
-    build_weapon_phash_index,
-    load_weapon_phash_index_bits,
-    match_weapon_crop_phash_filtered,
-    detect_weapon_rarity_from_crop,
+	build_weapon_phash_index,
+	load_weapon_phash_index_bits,
+	match_weapon_crop_phash_filtered,
+	detect_weapon_rarity_from_crop,
 )
-from services.icon_enricher_orb import enrich_characters_orb, enrich_weapons_orb
+from services.icon_enricher_orb import enrich_characters_orb
 from services.data_updater import check_and_update
 from parser.hoyolab_parser import HoyolabParser
 from ui.run_history_window import RunHistoryWindow
@@ -41,9 +40,6 @@ STATE_FILE = "state.json"
 RUNS_FILE = "runs_history.json"
 
 
-# ===============================
-# MAIN WINDOW
-# ===============================
 class App(QWidget):
 	def __init__(self):
 		super().__init__()
@@ -54,42 +50,47 @@ class App(QWidget):
 		self.floors = []
 		self.teams = []
 
+		self.ctrl_pressed = False
+		self.pending_grid_updates = False
+		self._resize_timer = None
+		self._ui_ready = False
+		self._initial_grid_built = False
+
 		self.build_left_panel()
 		self.build_right_panel()
 		self.load_state()
 
-		# Отложенная загрузка сеток
-		QTimer.singleShot(50, self.update_grids)
+	def showEvent(self, event):
+		super().showEvent(event)
 
-		# Флаг для отслеживания зажатого Ctrl
-		self.ctrl_pressed = False
+		if not self._initial_grid_built:
+			self._initial_grid_built = True
+			QTimer.singleShot(0, self._finish_initial_ui)
 
-		# Список ожидающих обновлений (если Ctrl зажат)
-		self.pending_grid_updates = False
+	def _finish_initial_ui(self):
+		self.update_grids()
+		self._ui_ready = True
+
+	def _refresh_ui_after_parse(self):
+		QTimer.singleShot(0, self.safe_update_grids)
 
 	def keyPressEvent(self, event):
-		"""Обработка нажатия клавиш"""
 		if event.key() == Qt.Key_Control:
 			self.ctrl_pressed = True
 		super().keyPressEvent(event)
 
 	def keyReleaseEvent(self, event):
-		"""Обработка отпускания клавиш"""
 		if event.key() == Qt.Key_Control:
 			self.ctrl_pressed = False
-			# Если были отложенные обновления - выполняем
 			if self.pending_grid_updates:
 				self.update_grids()
 				self.pending_grid_updates = False
 		super().keyReleaseEvent(event)
 
 	def safe_update_grids(self):
-		"""Безопасное обновление сеток (с учетом Ctrl)"""
 		if self.ctrl_pressed:
-			# Ctrl зажат - откладываем обновление
 			self.pending_grid_updates = True
 		else:
-			# Ctrl не зажат - обновляем сразу
 			self.update_grids()
 
 	# ---------- HISTORY ----------
@@ -179,52 +180,51 @@ class App(QWidget):
 		right.addStretch()
 		self.main.addLayout(right, 1)
 
-	# ---------- GRID METHODS (РАВНОМЕРНАЯ СЕТКА) ----------
+	# ---------- GRID METHODS ----------
+	def _clear_grid(self, grid):
+		while grid.count():
+			item = grid.takeAt(0)
+			w = item.widget()
+			if w is not None:
+				w.setParent(None)
+				w.deleteLater()
+
 	def reload_characters(self):
-		"""Перезагрузить сетку персонажей с равномерными отступами"""
-		# Очистка
-		while self.char_grid.count():
-			item = self.char_grid.takeAt(0)
-			if item.widget():
-				item.widget().deleteLater()
+		self._clear_grid(self.char_grid)
 
 		if not os.path.exists(ASSETS_CHAR):
+			self.char_widget.adjustSize()
 			return
 
-		files = [f for f in sorted(os.listdir(ASSETS_CHAR))
-		         if f.lower().endswith(".png")]
+		files = [f for f in sorted(os.listdir(ASSETS_CHAR)) if f.lower().endswith(".png")]
 		if not files:
+			self.char_widget.adjustSize()
 			return
 
-		# РАСЧЕТ КОЛОНОК на основе реальной ширины
 		available_width = self.char_area.viewport().width()
+		if available_width <= 20:
+			available_width = self.char_area.width()
+		if available_width <= 20:
+			available_width = 300
 
-		# Размер одной ячейки: иконка 72px + ФИКСИРОВАННЫЕ отступы
 		icon_size = 72
-		fixed_spacing = 3  # Фиксированное расстояние между иконками
+		fixed_spacing = 3
 		cell_width = icon_size + fixed_spacing
 
-		# Количество колонок = доступная ширина / ширина ячейки
 		cols = max(1, (available_width + fixed_spacing) // cell_width)
+		total_grid_width = cols * icon_size + max(0, cols - 1) * fixed_spacing
 
-		# Общая ширина всей сетки
-		total_grid_width = cols * cell_width
-
-		# Рассчитываем отступы слева и справа для центрирования
 		left_margin = max(0, (available_width - total_grid_width) // 2)
 		right_margin = max(0, available_width - total_grid_width - left_margin)
 
-		# Устанавливаем фиксированные отступы для центрирования
 		self.char_grid.setContentsMargins(left_margin, 0, right_margin, 0)
 		self.char_grid.setHorizontalSpacing(fixed_spacing)
 		self.char_grid.setVerticalSpacing(fixed_spacing)
 
-		# Колонки НЕ растягиваются, фиксированная ширина
 		for c in range(cols):
 			self.char_grid.setColumnMinimumWidth(c, icon_size)
 			self.char_grid.setColumnStretch(c, 0)
 
-		# Загрузка иконок
 		for i, f in enumerate(files):
 			try:
 				icon = DraggableIcon(os.path.join(ASSETS_CHAR, f), icon_size)
@@ -234,54 +234,46 @@ class App(QWidget):
 			except Exception as e:
 				print(f"Ошибка загрузки {f}: {e}")
 
-		# Обновляем виджет
 		self.char_widget.adjustSize()
+		self.char_widget.updateGeometry()
+		self.char_area.viewport().update()
 
 	def reload_weapons(self):
-		"""Перезагрузить сетку оружия с равномерными отступами"""
-		# Очистка
-		while self.weapon_grid.count():
-			item = self.weapon_grid.takeAt(0)
-			if item.widget():
-				item.widget().deleteLater()
+		self._clear_grid(self.weapon_grid)
 
 		if not os.path.exists(ASSETS_WEAP):
+			self.weapon_widget.adjustSize()
 			return
 
-		files = [f for f in sorted(os.listdir(ASSETS_WEAP))
-		         if f.lower().endswith(".png")]
+		files = [f for f in sorted(os.listdir(ASSETS_WEAP)) if f.lower().endswith(".png")]
 		if not files:
+			self.weapon_widget.adjustSize()
 			return
 
-		# РАСЧЕТ КОЛОНОК для оружия
 		available_width = self.weapon_area.viewport().width()
+		if available_width <= 20:
+			available_width = self.weapon_area.width()
+		if available_width <= 20:
+			available_width = 300
 
-		# Размер одной ячейки: иконка 48px + ФИКСИРОВАННЫЕ отступы
 		icon_size = 48
-		fixed_spacing = 6  # То же расстояние, что и для персонажей
+		fixed_spacing = 6
 		cell_width = icon_size + fixed_spacing
 
-		# Количество колонок
 		cols = max(1, (available_width + fixed_spacing) // cell_width)
+		total_grid_width = cols * icon_size + max(0, cols - 1) * fixed_spacing
 
-		# Общая ширина всей сетки
-		total_grid_width = cols * cell_width
-
-		# Рассчитываем отступы слева и справа для центрирования
 		left_margin = max(0, (available_width - total_grid_width) // 2)
 		right_margin = max(0, available_width - total_grid_width - left_margin)
 
-		# Устанавливаем фиксированные отступы для центрирования
 		self.weapon_grid.setContentsMargins(left_margin, 0, right_margin, 0)
 		self.weapon_grid.setHorizontalSpacing(fixed_spacing)
 		self.weapon_grid.setVerticalSpacing(fixed_spacing)
 
-		# Колонки НЕ растягиваются, фиксированная ширина
 		for c in range(cols):
 			self.weapon_grid.setColumnMinimumWidth(c, icon_size)
 			self.weapon_grid.setColumnStretch(c, 0)
 
-		# Загрузка иконок
 		for i, f in enumerate(files):
 			try:
 				icon = DraggableIcon(os.path.join(ASSETS_WEAP, f), icon_size)
@@ -291,26 +283,25 @@ class App(QWidget):
 			except Exception as e:
 				print(f"Ошибка загрузки {f}: {e}")
 
-		# Обновляем виджет
 		self.weapon_widget.adjustSize()
+		self.weapon_widget.updateGeometry()
+		self.weapon_area.viewport().update()
 
-	# ---------- RESIZE HANDLERS ----------
+	# ---------- RESIZE ----------
 	def resizeEvent(self, event):
-		"""Пересчитать сетку при изменении размера окна"""
 		super().resizeEvent(event)
-		self.update_grids_delayed()
+		if self._ui_ready:
+			self.update_grids_delayed()
 
 	def update_grids_delayed(self):
-		"""Обновить сетки с задержкой для оптимизации"""
-		if not hasattr(self, '_resize_timer'):
-			self._resize_timer = QTimer()
+		if self._resize_timer is None:
+			self._resize_timer = QTimer(self)
 			self._resize_timer.setSingleShot(True)
 			self._resize_timer.timeout.connect(self.update_grids)
 
 		self._resize_timer.start(75)
 
 	def update_grids(self):
-		"""Обновить обе сетки"""
 		self.reload_characters()
 		self.reload_weapons()
 
@@ -323,7 +314,7 @@ class App(QWidget):
 	def save_state(self):
 		data = {
 			"floors": [{"t1": f.t1.seconds_left, "t2": f.t2.seconds_left} for f in self.floors],
-			"teams": [[slot.to_dict() for slot in team] for team in self.teams]
+			"teams": [[slot.to_dict() for slot in team] for team in self.teams],
 		}
 		with open(STATE_FILE, "w", encoding="utf-8") as f:
 			json.dump(data, f, indent=2)
@@ -331,6 +322,7 @@ class App(QWidget):
 	def load_state(self):
 		if not os.path.exists(STATE_FILE):
 			return
+
 		try:
 			with open(STATE_FILE, "r", encoding="utf-8") as f:
 				data = json.load(f)
@@ -357,22 +349,19 @@ class App(QWidget):
 		if not path:
 			return
 
-		# 0) опционально: обновляем data (если у тебя это работает)
 		try:
 			check_and_update()
 		except Exception as e:
 			print("check_and_update failed:", e)
 
-		# 1) парсим скрин -> кропы сохранятся в assets/characters и assets/weapons
 		parser = HoyolabParser(path)
-		parsed = parser.parse()  # {"characters","weapons","pairs"}
+		parsed = parser.parse()
 
-		# 2) распознаём персонажей ORB -> создаст debug/orb/report.json и HD в assets/hd/characters
 		try:
 			res_chars = enrich_characters_orb(
-				crops_char_dir=CROPS_CHAR,  # assets/characters
+				crops_char_dir=CROPS_CHAR,
 				data_dir="data",
-				out_hd_dir=ASSETS_CHAR,  # assets/hd/characters
+				out_hd_dir=ASSETS_CHAR,
 				debug_dir="debug/orb",
 				score_threshold=28,
 				margin=6,
@@ -381,7 +370,6 @@ class App(QWidget):
 		except Exception as e:
 			print("enrich_characters_orb failed:", e)
 
-		# 3) читаем report по персонажам: crop -> char_id
 		char_map = {}
 		try:
 			with open("debug/orb/report.json", "r", encoding="utf-8") as f:
@@ -392,14 +380,11 @@ class App(QWidget):
 		except Exception as e:
 			print("Не удалось прочитать debug/orb/report.json:", e)
 
-		# если персонажи не распознаны — дальше оружие бессмысленно
 		if not char_map:
 			print("char_map пустой — оружие пропущено (нет распознанных персонажей).")
-			self.reload_characters()
-			self.reload_weapons()
+			self._refresh_ui_after_parse()
 			return
 
-		# 4) грузим базы
 		try:
 			with open("data/characters.json", "r", encoding="utf-8") as f:
 				chars_db = json.load(f)
@@ -407,9 +392,9 @@ class App(QWidget):
 				weaps_db = json.load(f)
 		except Exception as e:
 			print("Не удалось загрузить data/*.json:", e)
+			self._refresh_ui_after_parse()
 			return
 
-		# 5) строим/грузим pHash индекс оружия (если нет)
 		try:
 			build_weapon_phash_index(
 				data_dir="data",
@@ -425,9 +410,9 @@ class App(QWidget):
 		index_bits = load_weapon_phash_index_bits("cache/ref_index/weapons_phash_64.json")
 		if not index_bits:
 			print("Индекс оружия пуст — проверь cache/enka_ref_weapons и сборку индекса.")
+			self._refresh_ui_after_parse()
 			return
 
-		# 6) кандидаты по (type, rarity)
 		type_rarity_to_ids = {}
 		for wid, meta in weaps_db.items():
 			t = meta.get("type")
@@ -437,16 +422,14 @@ class App(QWidget):
 			key = (str(t), int(r))
 			type_rarity_to_ids.setdefault(key, []).append(str(wid))
 
-		# 7) debug папки для оружия (кроп + реф)
 		debug_dir = "debug/phash_weapons"
 		acc_dir = os.path.join(debug_dir, "accepted")
 		rej_dir = os.path.join(debug_dir, "rejected")
 		os.makedirs(acc_dir, exist_ok=True)
 		os.makedirs(rej_dir, exist_ok=True)
 
-		# 8) распознаём оружие по pairs + type+rarity
-		crops_weap_dir = CROPS_WEAP  # assets/weapons (кропы)
-		out_hd_weap_dir = ASSETS_WEAP  # assets/hd/weapons (показываем в UI)
+		crops_weap_dir = CROPS_WEAP
+		out_hd_weap_dir = ASSETS_WEAP
 		os.makedirs(out_hd_weap_dir, exist_ok=True)
 
 		accepted = 0
@@ -461,8 +444,7 @@ class App(QWidget):
 		pairs = parsed.get("pairs", [])
 		if not pairs:
 			print("pairs пустой — парсер не вернул пары. Оружие пропущено.")
-			self.reload_characters()
-			self.reload_weapons()
+			self._refresh_ui_after_parse()
 			return
 
 		for pair in pairs:
@@ -472,7 +454,6 @@ class App(QWidget):
 			char_crop_name = f"char_{ci:03d}.png"
 			weapon_crop_name = f"weapon_{wi:03d}.png"
 
-			# персонаж должен быть распознан
 			char_id = char_map.get(char_crop_name)
 			if not char_id:
 				skipped_no_char += 1
@@ -491,10 +472,11 @@ class App(QWidget):
 			rar = detect_weapon_rarity_from_crop(crop_bgr)
 			if rar is None:
 				skipped_no_rarity += 1
-				# debug: кладём в rejected (rarity unknown)
 				try:
-					cv2.imwrite(os.path.join(rej_dir, f"{os.path.splitext(weapon_crop_name)[0]}__rar_none.png"),
-								crop_bgr)
+					cv2.imwrite(
+						os.path.join(rej_dir, f"{os.path.splitext(weapon_crop_name)[0]}__rar_none.png"),
+						crop_bgr,
+					)
 				except Exception:
 					pass
 				continue
@@ -512,35 +494,38 @@ class App(QWidget):
 			)
 
 			ok = (
-					best_id is not None
-					and best_d <= MAX_DIST
-					and (second_d - best_d) >= MARGIN
+				best_id is not None
+				and best_d <= MAX_DIST
+				and (second_d - best_d) >= MARGIN
 			)
 
 			if not ok:
 				rejected += 1
-				# debug: сохраняем кроп с инфой
 				try:
-					name = f"{os.path.splitext(weapon_crop_name)[0]}__best_{best_id}__d_{best_d}__s_{second_d}__t_{weapon_type}__r_{rar}.png"
+					name = (
+						f"{os.path.splitext(weapon_crop_name)[0]}"
+						f"__best_{best_id}__d_{best_d}__s_{second_d}"
+						f"__t_{weapon_type}__r_{rar}.png"
+					)
 					cv2.imwrite(os.path.join(rej_dir, name), crop_bgr)
 				except Exception:
 					pass
 				continue
 
-			# debug accepted: кроп + ref
 			try:
-				base = f"{os.path.splitext(weapon_crop_name)[0]}__id_{best_id}__d_{best_d}__t_{weapon_type}__r_{rar}"
+				base = (
+					f"{os.path.splitext(weapon_crop_name)[0]}"
+					f"__id_{best_id}__d_{best_d}__t_{weapon_type}__r_{rar}"
+				)
 				cv2.imwrite(os.path.join(acc_dir, base + ".png"), crop_bgr)
 
 				ref_path = os.path.join("cache/enka_ref_weapons", f"{best_id}.png")
 				ref_bgr = cv2.imread(ref_path, cv2.IMREAD_UNCHANGED)
 				if ref_bgr is not None:
-					# сохраняем как есть (может быть с альфой)
 					cv2.imwrite(os.path.join(acc_dir, base + "__ref.png"), ref_bgr)
 			except Exception:
 				pass
 
-			# сохраняем HD (уникально)
 			src = os.path.join("cache/enka_ref_weapons", f"{best_id}.png")
 			dst = os.path.join(out_hd_weap_dir, f"{best_id}.png")
 			if os.path.exists(src) and not os.path.exists(dst):
@@ -559,14 +544,12 @@ class App(QWidget):
 			"debug_dir": debug_dir,
 		})
 
-		# 9) обновляем UI
-		self.reload_characters()
-		self.reload_weapons()
+		self._refresh_ui_after_parse()
 
 	def clear_assets(self):
 		folders_to_clear = [
-			"assets/characters",  # КРОПЫ персонажей
-			"assets/weapons",  # КРОПЫ оружия
+			"assets/characters",
+			"assets/weapons",
 			"assets/hd/characters",
 			"assets/hd/weapons",
 			"debug",
@@ -576,12 +559,10 @@ class App(QWidget):
 			shutil.rmtree(folder, ignore_errors=True)
 			os.makedirs(folder, exist_ok=True)
 
-		self.reload_characters()
-		self.reload_weapons()
+		self._refresh_ui_after_parse()
 		QMessageBox.information(self, "Готово", "Кропы/HD/дебаг очищены")
 
 	def reset_run(self):
-		# Сбрасываем таймеры до 10:00
 		for floor in self.floors:
 			floor.t1.min_spin.setValue(10)
 			floor.t1.sec_spin.setValue(0)
@@ -595,17 +576,13 @@ class App(QWidget):
 
 			floor.total.setText("0")
 
-		# Очищаем слоты команд
 		for team in self.teams:
 			for slot in team:
 				slot.char.clear()
 				slot.weapon.clear()
 				slot.artifact.clear()
 
-		# Обновляем общий лейбл
 		self.total_label.setText("Итого: 0 сек")
-
-		# Сохраняем состояние
 		self.save_state()
 
 	def save_run(self):
@@ -629,8 +606,8 @@ class App(QWidget):
 			},
 			"floors": {
 				"team1": team1_floors,
-				"team2": team2_floors
-			}
+				"team2": team2_floors,
+			},
 		}
 
 		runs = []

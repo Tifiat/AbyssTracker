@@ -38,7 +38,6 @@ class DraggableIcon(QLabel):
 		"""Обновлять pixmap при смене экрана / DPI / размера."""
 		if event.type() in (
 			QEvent.Type.DevicePixelRatioChange,
-			QEvent.Type.ScreenChangeInternal,
 			QEvent.Type.Resize,
 			QEvent.Type.Show,
 		):

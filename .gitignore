@@ -16,3 +16,9 @@ Thumbs.db
 assets/
 cache/
 debug/
+/data/characters.json
+/data/hash_index_characters.json
+/data/hash_index_weapons.json
+/data/manifest.json
+/data/weapons.json
+/data/
