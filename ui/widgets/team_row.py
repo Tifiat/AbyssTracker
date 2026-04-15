@@ -21,6 +21,9 @@ class TeamRow(QWidget):
         self.base_icon_size = self.ICON_SIZE
         self.base_weapon_size = 22
         self.base_artifact_size = 20
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self._refresh_all_pixmaps)
 
         for slot in team_slots:
             icon_container = QWidget()
@@ -81,7 +84,12 @@ class TeamRow(QWidget):
         self.floor_labels.append(total_lbl)
         layout.addWidget(total_lbl)
 
-        QTimer.singleShot(0, self._refresh_all_pixmaps)
+        self._schedule_refresh()
+
+    def _schedule_refresh(self):
+        if self._refresh_timer.isActive():
+            self._refresh_timer.stop()
+        self._refresh_timer.start(0)
 
     def _set_scaled_pixmap(self, label, target_w, target_h):
         if not getattr(label, "base_pixmap", None):
@@ -102,26 +110,34 @@ class TeamRow(QWidget):
         label.setPixmap(pixmap)
 
     def _refresh_all_pixmaps(self):
-        for i, char_label in enumerate(self.char_icons):
-            char_size = char_label.width()
-            self._set_scaled_pixmap(char_label, char_size, char_size)
+        count = min(len(self.char_icons), len(self.weapon_icons), len(self.artifact_icons))
 
-            weapon_label = self.weapon_icons[i]
-            self._set_scaled_pixmap(weapon_label, weapon_label.width(), weapon_label.height())
+        for i in range(count):
+            try:
+                char_label = self.char_icons[i]
+                weapon_label = self.weapon_icons[i]
+                artifact_label = self.artifact_icons[i]
 
-            artifact_label = self.artifact_icons[i]
-            self._set_scaled_pixmap(artifact_label, artifact_label.width(), artifact_label.height())
+                char_size = char_label.width()
+                self._set_scaled_pixmap(char_label, char_size, char_size)
+                self._set_scaled_pixmap(weapon_label, weapon_label.width(), weapon_label.height())
+                self._set_scaled_pixmap(artifact_label, artifact_label.width(), artifact_label.height())
+            except RuntimeError:
+                continue
 
-        self.update_icon_positions()
+        try:
+            self.update_icon_positions()
+        except RuntimeError:
+            pass
 
     def event(self, event):
         if event.type() in (
-            QEvent.Type.DevicePixelRatioChange,
-            QEvent.Type.ScreenChangeInternal,
-            QEvent.Type.Resize,
-            QEvent.Type.Show,
+                QEvent.Type.DevicePixelRatioChange,
+                QEvent.Type.ScreenChangeInternal,
+                QEvent.Type.Resize,
+                QEvent.Type.Show,
         ):
-            QTimer.singleShot(0, self._refresh_all_pixmaps)
+            self._schedule_refresh()
         return super().event(event)
 
     def set_scale(self, factor):

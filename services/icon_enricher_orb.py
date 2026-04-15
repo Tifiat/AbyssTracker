@@ -89,28 +89,6 @@ def _read_char_ref_for_orb(img_bgr: np.ndarray) -> np.ndarray:
     return gray
 
 
-# -----------------------------
-# Preprocessing: Weapons
-# -----------------------------
-def _read_weapon_for_orb(img_bgr: np.ndarray) -> np.ndarray:
-    """
-    Оружие слишком маленькое и "плоское", поэтому:
-    - upscale
-    - grayscale
-    - edges (Canny) по силуэту
-    """
-
-    h, w = img_bgr.shape[:2]
-    p = int(min(h, w) * 0.18)  # было 0, делаем сильнее
-    if p > 0 and h - 2 * p >= 16 and w - 2 * p >= 16:
-        img_bgr = img_bgr[p:h - p, p:w - p]
-
-    img = cv2.resize(img_bgr, (256, 256), interpolation=cv2.INTER_CUBIC)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
-    edges = cv2.Canny(gray, 40, 120)
-    return edges
-
 
 # -----------------------------
 # ORB Index
@@ -235,28 +213,6 @@ class OrbIndex:
         inliers = int(mask.ravel().sum())
         return inliers
 
-
-class OrbIndexWeapons(OrbIndex):
-    """
-    Отдельный индекс для оружия: edges+upscale и другой ORB.
-    """
-
-    def __init__(self, items: dict, cache_dir: str, allow_download: bool):
-        super().__init__(items=items, cache_dir=cache_dir, allow_download=allow_download)
-
-        self.orb = cv2.ORB_create(
-            nfeatures=2500,
-            scaleFactor=1.2,
-            nlevels=12,
-            edgeThreshold=5,
-            fastThreshold=5,
-            patchSize=31,
-        )
-
-    def _ref_to_orb_input(self, ref_bgr: np.ndarray) -> np.ndarray:
-        return _read_weapon_for_orb(ref_bgr)
-
-
 # -----------------------------
 # Enrich: Characters
 # -----------------------------
@@ -369,120 +325,6 @@ def enrich_characters_orb(
         pass
 
     return {"characters_saved_hd": saved_hd, "debug_report": os.path.join(debug_dir, "report.json")}
-
-
-# -----------------------------
-# Enrich: Weapons
-# -----------------------------
-def enrich_weapons_orb(
-    crops_weap_dir: str,
-    data_dir: str = "data",
-    out_hd_dir: str = "assets/hd/weapons",
-    debug_dir: str = "debug/orb_weapons",
-    score_threshold: int = 10,
-    margin: int = 3,
-    allow_download: bool = True,
-) -> dict:
-    weapons = _load_json(_p(data_dir, "weapons.json"))
-
-    out_hd_dir = _p(out_hd_dir)
-    debug_dir = _p(debug_dir)
-    cache_dir = _p("cache", "enka_ref_weapons")
-
-    _ensure_dir(out_hd_dir)
-    _ensure_dir(debug_dir)
-    _ensure_dir(cache_dir)
-
-    accepted_dir = os.path.join(debug_dir, "accepted")
-    rejected_dir = os.path.join(debug_dir, "rejected")
-    _ensure_dir(accepted_dir)
-    _ensure_dir(rejected_dir)
-
-    idx = OrbIndexWeapons(items=weapons, cache_dir=cache_dir, allow_download=allow_download)
-
-    crops_weap_dir = _p(crops_weap_dir)
-    files = []
-    if os.path.exists(crops_weap_dir):
-        files = [f for f in sorted(os.listdir(crops_weap_dir)) if f.lower().endswith(".png")]
-
-    report = {"accepted": [], "rejected": []}
-    saved_hd = 0
-    ids = list(weapons.keys())
-
-    for fname in files:
-        crop_path = os.path.join(crops_weap_dir, fname)
-        crop_bgr = cv2.imread(crop_path, cv2.IMREAD_COLOR)
-        if crop_bgr is None:
-            continue
-
-        crop_bgr_orig = crop_bgr.copy()
-        crop_inp = _read_weapon_for_orb(crop_bgr)
-
-        best_id = None
-        best_score = -1
-        second_score = -1
-
-        for _id in ids:
-            s = idx.score_match(crop_inp, _id)
-            if s > best_score:
-                second_score = best_score
-                best_score = s
-                best_id = _id
-            elif s > second_score:
-                second_score = s
-
-        accepted = (
-            best_id is not None
-            and best_score >= score_threshold
-            and (best_score - second_score) >= margin
-        )
-
-        if not accepted:
-            report["rejected"].append({
-                "crop": fname,
-                "best_id": best_id,
-                "best_score": best_score,
-                "second_score": second_score
-            })
-            try:
-                dbg_name = f"{os.path.splitext(fname)[0]}__best_{best_id}__s_{best_score}__second_{second_score}.png"
-                cv2.imwrite(os.path.join(rejected_dir, dbg_name), crop_bgr_orig)
-            except Exception:
-                pass
-            continue
-
-        report["accepted"].append({
-            "crop": fname,
-            "id": best_id,
-            "best_score": best_score,
-            "second_score": second_score
-        })
-
-        # debug: кроп + ref
-        try:
-            base = f"{os.path.splitext(fname)[0]}__id_{best_id}__score_{best_score}"
-            cv2.imwrite(os.path.join(accepted_dir, base + ".png"), crop_bgr_orig)
-            ref_bgr = idx._load_ref_image_bgr(best_id)
-            if ref_bgr is not None:
-                cv2.imwrite(os.path.join(accepted_dir, base + "__ref.png"), ref_bgr)
-        except Exception:
-            pass
-
-        # HD: НЕ качаем заново — берём из cache/<id>.png
-        hd_path = os.path.join(out_hd_dir, f"{best_id}.png")
-        if os.path.exists(hd_path):
-            continue
-
-        if _copy_from_cache_if_exists(cache_dir, best_id, hd_path):
-            saved_hd += 1
-
-    try:
-        with open(os.path.join(debug_dir, "report.json"), "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-    return {"weapons_saved_hd": saved_hd, "debug_report": os.path.join(debug_dir, "report.json")}
 
 def warmup_weapon_cache(
     data_dir: str = "data",

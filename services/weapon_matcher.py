@@ -60,6 +60,16 @@ RARITY_BG = {
     5: (80, 140, 190),
 }
 
+REF_VIEW_PARAMS = [
+    {"scale": 0.76, "dx": 0.00, "dy": 0.00},
+    {"scale": 0.84, "dx": 0.00, "dy": 0.00},
+    {"scale": 0.92, "dx": 0.00, "dy": 0.00},
+    {"scale": 0.84, "dx": -0.03, "dy": 0.00},
+    {"scale": 0.84, "dx": 0.03, "dy": 0.00},
+    {"scale": 0.84, "dx": 0.00, "dy": -0.03},
+    {"scale": 0.84, "dx": 0.00, "dy": 0.03},
+]
+
 
 @dataclass
 class MatchDecision:
@@ -69,6 +79,7 @@ class MatchDecision:
     accepted: bool
     method: str
     extra: dict
+
 
 _DEVICE = None
 _DINO = None
@@ -120,17 +131,29 @@ def _encode_bgr_dino(img_bgr: np.ndarray) -> np.ndarray:
     emb = feat.squeeze(0).detach().cpu().numpy().astype(np.float32)
     return _l2norm(emb)
 
-def _make_ref_views(ref_png_path: str, rarity: int | None, size: int = 224) -> list[tuple[str, np.ndarray]]:
-    views = []
-    params = [
-        ("base",   {"scale": 0.84, "dx": 0.00, "dy": 0.00}),
-        ("zoom",   {"scale": 0.92, "dx": 0.00, "dy": 0.00}),
-        ("small",  {"scale": 0.76, "dx": 0.00, "dy": 0.00}),
-        ("left",   {"scale": 0.84, "dx": -0.03, "dy": 0.00}),
-        ("right",  {"scale": 0.84, "dx": 0.03, "dy": 0.00}),
-    ]
+def _debug_dump_retrieval_views(
+    crop_bgr: np.ndarray,
+    ref_png_path: str,
+    rarity: int | None,
+    wid: str,
+    size: int = 224,
+    out_dir: str = "debug/retrieval_views",
+):
+    print("DEBUG ENTER _debug_dump_retrieval_views", wid, _p(out_dir))
+    _ensure_dir(_p(out_dir))
 
-    for view_name, p in params:
+    crop_prep = _prepare_crop_for_match(crop_bgr, size=size)
+    crop_emb = _encode_bgr_dino(crop_prep)
+
+    crop_out = _p(out_dir, f"{wid}__crop_prep.png")
+    try:
+        cv2.imwrite(crop_out, crop_prep)
+    except Exception:
+        pass
+
+    rows = []
+
+    for idx, p in enumerate(REF_VIEW_PARAMS):
         ref_view = _render_ref_view(
             ref_png_path=ref_png_path,
             rarity=rarity,
@@ -139,10 +162,63 @@ def _make_ref_views(ref_png_path: str, rarity: int | None, size: int = 224) -> l
             dx=float(p["dx"]),
             dy=float(p["dy"]),
         )
-        if ref_view is not None:
-            views.append((view_name, ref_view))
+        if ref_view is None:
+            rows.append({
+                "view_idx": idx,
+                "scale": p["scale"],
+                "dx": p["dx"],
+                "dy": p["dy"],
+                "sim": None,
+                "reason": "ref_view_none",
+            })
+            continue
 
-    return views
+        try:
+            ref_emb = _encode_bgr_dino(ref_view)
+            sim = float(ref_emb @ crop_emb)
+        except Exception as e:
+            sim = None
+            rows.append({
+                "view_idx": idx,
+                "scale": p["scale"],
+                "dx": p["dx"],
+                "dy": p["dy"],
+                "sim": None,
+                "reason": f"encode_error: {e}",
+            })
+            continue
+
+        view_out = _p(out_dir, f"{wid}__view_{idx}__sim_{sim:.4f}.png")
+        try:
+            cv2.imwrite(view_out, ref_view)
+        except Exception:
+            pass
+
+        rows.append({
+            "view_idx": idx,
+            "scale": p["scale"],
+            "dx": p["dx"],
+            "dy": p["dy"],
+            "sim": sim,
+        })
+
+    rows_sorted = sorted(
+        rows,
+        key=lambda x: -999.0 if x.get("sim") is None else -float(x["sim"])
+    )
+
+    try:
+        with open(_p(out_dir, f"{wid}__report.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "wid": str(wid),
+                "rarity": rarity,
+                "size": size,
+                "views": rows_sorted,
+            }, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    print(f"DEBUG retrieval dump saved for wid={wid} -> {_p(out_dir)}")
 
 def build_weapon_embedding_index(
     weaps_db: dict,
@@ -165,6 +241,7 @@ def build_weapon_embedding_index(
     total_refs = 0
     skipped_missing_png = 0
     skipped_bad_ref = 0
+    skipped_encode_error = 0
 
     items = list(weaps_db.items())
     total = len(items)
@@ -184,14 +261,13 @@ def build_weapon_embedding_index(
             continue
 
         total_refs += 1
+        print(f"   ↳ weapon {wid} views: {len(views)}")
 
         for j, view_bgr in enumerate(views):
-            if j == 0:
-                print(f"   ↳ weapon {wid} views: {len(views)}")
-
             try:
                 emb = _encode_bgr_dino(view_bgr)
             except Exception:
+                skipped_encode_error += 1
                 continue
 
             embs.append(emb.astype(np.float32))
@@ -206,6 +282,7 @@ def build_weapon_embedding_index(
             "total_refs": total_refs,
             "skipped_missing_png": skipped_missing_png,
             "skipped_bad_ref": skipped_bad_ref,
+            "skipped_encode_error": skipped_encode_error,
         }
 
     emb_matrix = np.stack(embs, axis=0).astype(np.float32)
@@ -228,6 +305,7 @@ def build_weapon_embedding_index(
         "unique_weapons": int(len(set(weapon_ids))),
         "skipped_missing_png": skipped_missing_png,
         "skipped_bad_ref": skipped_bad_ref,
+        "skipped_encode_error": skipped_encode_error,
     }
 
 
@@ -252,6 +330,7 @@ def load_weapon_embedding_index(
         "rarities": rarities,
         "view_names": view_names,
     }
+
 
 def retrieve_top_candidates(
     crop_bgr: np.ndarray,
@@ -287,25 +366,17 @@ def retrieve_top_candidates(
             best_by_id[wid] = sim
 
     ranked = sorted(best_by_id.items(), key=lambda x: x[1], reverse=True)
+    if "15426" in candidate_set:
+        print("DEBUG has_15426_in_candidate_set = True")
+        print("DEBUG best sim for 15426 =", best_by_id.get("15426"))
+        print("DEBUG top10 =", ranked[:10])
     return ranked[:top_n]
-
-def _cosine(a: np.ndarray, b: np.ndarray) -> float:
-    return float(np.dot(a, b))
 
 
 def _make_ref_views(ref_png_path: str, rarity: int | None, size: int = 224) -> list[np.ndarray]:
     views = []
-    params = [
-        {"scale": 0.76, "dx": 0.00, "dy": 0.00},
-        {"scale": 0.84, "dx": 0.00, "dy": 0.00},
-        {"scale": 0.92, "dx": 0.00, "dy": 0.00},
-        {"scale": 0.84, "dx": -0.03, "dy": 0.00},
-        {"scale": 0.84, "dx": 0.03, "dy": 0.00},
-        {"scale": 0.84, "dx": 0.00, "dy": -0.03},
-        {"scale": 0.84, "dx": 0.00, "dy": 0.03},
-    ]
 
-    for p in params:
+    for p in REF_VIEW_PARAMS:
         ref_view = _render_ref_view(
             ref_png_path=ref_png_path,
             rarity=rarity,
@@ -319,6 +390,232 @@ def _make_ref_views(ref_png_path: str, rarity: int | None, size: int = 224) -> l
 
     return views
 
+def _render_ref_mask_view(
+    ref_png_path: str,
+    size: int = 160,
+    scale: float = 0.84,
+    dx: float = 0.0,
+    dy: float = 0.0,
+) -> np.ndarray | None:
+    img = _load_image(ref_png_path, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+
+    if len(img.shape) == 2:
+        return None
+
+    if img.shape[2] == 4:
+        alpha = img[:, :, 3]
+    else:
+        gray = cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2GRAY)
+        _, alpha = cv2.threshold(gray, 8, 255, cv2.THRESH_BINARY)
+
+    h, w = alpha.shape[:2]
+    if h < 2 or w < 2:
+        return None
+
+    canvas = np.zeros((size, size), dtype=np.uint8)
+
+    target = int(size * scale)
+    scale_k = min(target / float(w), target / float(h))
+    nw, nh = max(1, int(round(w * scale_k))), max(1, int(round(h * scale_k)))
+    alpha2 = cv2.resize(alpha, (nw, nh), interpolation=cv2.INTER_AREA)
+
+    x = int(round((size - nw) / 2.0 + dx * size))
+    y = int(round((size - nh) / 2.0 + dy * size))
+
+    x = max(0, min(size - nw, x))
+    y = max(0, min(size - nh, y))
+
+    canvas[y:y + nh, x:x + nw] = alpha2
+
+    _, canvas = cv2.threshold(canvas, 16, 255, cv2.THRESH_BINARY)
+
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    canvas = cv2.morphologyEx(canvas, cv2.MORPH_OPEN, k, iterations=1)
+    canvas = cv2.morphologyEx(canvas, cv2.MORPH_CLOSE, k, iterations=1)
+    return canvas
+
+
+def _masked_appearance_features(img_bgr: np.ndarray, mask: np.ndarray) -> dict:
+    if img_bgr is None or mask is None:
+        return {"valid": False, "reason": "empty"}
+
+    if img_bgr.shape[:2] != mask.shape[:2]:
+        return {"valid": False, "reason": "shape_mismatch"}
+
+    m = (mask > 0)
+    count = int(np.count_nonzero(m))
+    if count < 32:
+        return {"valid": False, "reason": "too_few_pixels", "count": count}
+
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    H = hsv[:, :, 0][m].astype(np.float32)
+    S = hsv[:, :, 1][m].astype(np.float32)
+    V = hsv[:, :, 2][m].astype(np.float32)
+
+    hue_hist = cv2.calcHist([hsv], [0], mask.astype(np.uint8), [12], [0, 180]).flatten().astype(np.float32)
+    hist_sum = float(hue_hist.sum())
+    if hist_sum > 1e-6:
+        hue_hist /= hist_sum
+
+    return {
+        "valid": True,
+        "count": count,
+        "sat_p50": float(np.percentile(S, 50)),
+        "sat_p75": float(np.percentile(S, 75)),
+        "val_p50": float(np.percentile(V, 50)),
+        "val_p75": float(np.percentile(V, 75)),
+        "bright_ratio": float(np.mean(V >= 200)),
+        "dark_ratio": float(np.mean(V <= 70)),
+        "vivid_ratio": float(np.mean((S >= 80) & (V >= 160))),
+        "hue_hist": hue_hist.tolist(),
+    }
+
+
+def _hist_intersection(a: list[float], b: list[float]) -> float:
+    aa = np.asarray(a, dtype=np.float32)
+    bb = np.asarray(b, dtype=np.float32)
+    if aa.size == 0 or bb.size == 0 or aa.shape != bb.shape:
+        return 0.0
+    return float(np.minimum(aa, bb).sum())
+
+
+def _score_closeness(a: float, b: float, scale: float) -> float:
+    if scale <= 1e-6:
+        return 0.0
+    d = abs(float(a) - float(b)) / float(scale)
+    return float(max(0.0, 1.0 - min(1.0, d)))
+
+
+def _appearance_match_score(
+    crop_bgr: np.ndarray,
+    crop_mask: np.ndarray,
+    ref_bgr: np.ndarray,
+    ref_mask: np.ndarray,
+) -> tuple[float, dict]:
+    crop_feat = _masked_appearance_features(crop_bgr, crop_mask)
+    ref_feat = _masked_appearance_features(ref_bgr, ref_mask)
+
+    if not crop_feat.get("valid") or not ref_feat.get("valid"):
+        return 0.0, {
+            "appearance_score": 0.0,
+            "crop_feat": crop_feat,
+            "ref_feat": ref_feat,
+        }
+
+    hue_score = _hist_intersection(crop_feat["hue_hist"], ref_feat["hue_hist"])
+    sat_score = 0.5 * _score_closeness(crop_feat["sat_p50"], ref_feat["sat_p50"], 80.0) + \
+                0.5 * _score_closeness(crop_feat["sat_p75"], ref_feat["sat_p75"], 80.0)
+    val_score = 0.5 * _score_closeness(crop_feat["val_p50"], ref_feat["val_p50"], 80.0) + \
+                0.5 * _score_closeness(crop_feat["val_p75"], ref_feat["val_p75"], 80.0)
+    bright_score = _score_closeness(crop_feat["bright_ratio"], ref_feat["bright_ratio"], 0.35)
+    dark_score = _score_closeness(crop_feat["dark_ratio"], ref_feat["dark_ratio"], 0.35)
+    vivid_score = _score_closeness(crop_feat["vivid_ratio"], ref_feat["vivid_ratio"], 0.35)
+    hue_guard = max(0.0, min(1.0, (hue_score - 0.35) / 0.25))
+    bright_score *= (0.35 + 0.65 * hue_guard)
+    vivid_score *= (0.25 + 0.75 * hue_guard)
+
+    appearance_score = (
+            0.50 * hue_score +
+            0.18 * sat_score +
+            0.14 * val_score +
+            0.06 * bright_score +
+            0.06 * dark_score +
+            0.06 * vivid_score
+    )
+
+    return float(appearance_score), {
+        "appearance_score": float(appearance_score),
+        "hue_score": float(hue_score),
+        "sat_score": float(sat_score),
+        "val_score": float(val_score),
+        "bright_score": float(bright_score),
+        "dark_score": float(dark_score),
+        "vivid_score": float(vivid_score),
+        "crop_feat": crop_feat,
+        "ref_feat": ref_feat,
+    }
+
+
+def _score_candidate_masked(
+    crop_bgr: np.ndarray,
+    ref_png_path: str,
+    rarity: int | None,
+    size: int,
+    emb_sim: float,
+) -> tuple[float, dict]:
+    best_align_score = -1.0
+    best_ref_view = None
+    best_ref_mask = None
+    best_align_extra = {}
+    best_view_params = None
+
+    for p in REF_VIEW_PARAMS:
+        ref_view = _render_ref_view(
+            ref_png_path=ref_png_path,
+            rarity=rarity,
+            size=size,
+            scale=float(p["scale"]),
+            dx=float(p["dx"]),
+            dy=float(p["dy"]),
+        )
+        ref_mask = _render_ref_mask_view(
+            ref_png_path=ref_png_path,
+            size=size,
+            scale=float(p["scale"]),
+            dx=float(p["dx"]),
+            dy=float(p["dy"]),
+        )
+
+        if ref_view is None or ref_mask is None:
+            continue
+
+        align_score, align_extra = _score_crop_vs_ref(crop_bgr, ref_view)
+
+        if align_score > best_align_score:
+            best_align_score = float(align_score)
+            best_ref_view = ref_view
+            best_ref_mask = ref_mask
+            best_align_extra = align_extra
+            best_view_params = dict(p)
+
+    if best_ref_view is None or best_ref_mask is None:
+        return 0.0, {
+            "emb_sim": float(emb_sim),
+            "align_score": 0.0,
+            "appearance_score": 0.0,
+            "reason": "no_valid_ref_view",
+        }
+
+    crop_mask = best_ref_mask.copy()
+
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    crop_mask = cv2.erode(crop_mask, k, iterations=1)
+
+    appearance_score, appearance_extra = _appearance_match_score(
+        crop_bgr=crop_bgr,
+        crop_mask=crop_mask,
+        ref_bgr=best_ref_view,
+        ref_mask=best_ref_mask,
+    )
+
+    final_score = (
+        0.25 * float(emb_sim) +
+        0.20 * float(best_align_score) +
+        0.55 * float(appearance_score)
+    )
+
+    return float(final_score), {
+        "emb_sim": float(emb_sim),
+        "align_score": float(best_align_score),
+        "appearance_score": float(appearance_score),
+        "crop_mask_area": int(np.count_nonzero(crop_mask > 0)),
+        "ref_mask_area": int(np.count_nonzero(best_ref_mask > 0)),
+        "view_params": best_view_params,
+        **best_align_extra,
+        **appearance_extra,
+    }
 
 def detect_weapon_rarity_from_crop(crop_bgr: np.ndarray) -> int | None:
     h, w = crop_bgr.shape[:2]
@@ -327,7 +624,6 @@ def detect_weapon_rarity_from_crop(crop_bgr: np.ndarray) -> int | None:
 
     img = crop_bgr.copy()
 
-    # Мягко подрезаем рамку, но не слишком сильно
     p = int(min(h, w) * 0.08)
     if p > 0 and h - 2 * p >= 16 and w - 2 * p >= 16:
         img = img[p:h - p, p:w - p]
@@ -336,15 +632,14 @@ def detect_weapon_rarity_from_crop(crop_bgr: np.ndarray) -> int | None:
     if hh < 16 or ww < 16:
         return None
 
-    # Берём несколько угловых зон, а не центр
     patch_size = int(min(hh, ww) * 0.22)
     patch_size = max(8, patch_size)
 
     patches = [
-        img[0:patch_size, 0:patch_size],                         # top-left
-        img[0:patch_size, ww - patch_size:ww],                  # top-right
-        img[hh - patch_size:hh, 0:patch_size],                  # bottom-left
-        img[hh - patch_size:hh, ww - patch_size:ww],            # bottom-right
+        img[0:patch_size, 0:patch_size],
+        img[0:patch_size, ww - patch_size:ww],
+        img[hh - patch_size:hh, 0:patch_size],
+        img[hh - patch_size:hh, ww - patch_size:ww],
     ]
 
     hsv_pixels = []
@@ -358,7 +653,6 @@ def detect_weapon_rarity_from_crop(crop_bgr: np.ndarray) -> int | None:
         S = hsv[:, :, 1]
         V = hsv[:, :, 2]
 
-        # Отбрасываем слишком тёмное и почти серое
         mask = (V > 40) & (S > 25)
         if np.count_nonzero(mask) < 6:
             continue
@@ -374,27 +668,23 @@ def detect_weapon_rarity_from_crop(crop_bgr: np.ndarray) -> int | None:
     Sm = float(np.median(hsv_all[:, 1]))
     Vm = float(np.median(hsv_all[:, 2]))
 
-    # Очень низкая насыщенность — обычно 1*
     if Sm < 35 and Vm > 60:
         return 1
 
-    # 5* — золотисто-оранжевый
     if 8 <= Hm <= 28 and Sm >= 70:
         return 5
 
-    # 4* — фиолетовый / сиреневый
     if 125 <= Hm <= 170 and Sm >= 45:
         return 4
 
-    # 3* — синий / голубой
     if 90 <= Hm < 125 and Sm >= 45:
         return 3
 
-    # 2* — зелёный
     if 40 <= Hm < 90 and Sm >= 40:
         return 2
 
     return None
+
 
 def copy_weapon_hd_from_cache(best_id: str, out_hd_weap_dir: str = "assets/hd/weapons", cache_dir: str = "cache/enka_ref_weapons") -> bool:
     src = _p(cache_dir, f"{best_id}.png")
@@ -448,12 +738,44 @@ def _crop_inner(img_bgr: np.ndarray, pad_ratio: float = 0.18) -> np.ndarray:
         return img_bgr[p:h - p, p:w - p].copy()
     return img_bgr.copy()
 
+def _letterbox_to_square(
+    img_bgr: np.ndarray,
+    size: int = 224,
+    bg_bgr: tuple[int, int, int] = (127, 127, 127),
+) -> np.ndarray:
+    h, w = img_bgr.shape[:2]
+    if h < 1 or w < 1:
+        return np.full((size, size, 3), bg_bgr, dtype=np.uint8)
+
+    scale = min(size / float(w), size / float(h))
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+
+    resized = cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+    canvas = np.full((size, size, 3), bg_bgr, dtype=np.uint8)
+
+    x = (size - nw) // 2
+    y = (size - nh) // 2
+    canvas[y:y + nh, x:x + nw] = resized
+    return canvas
 
 def _prepare_crop_for_match(crop_bgr: np.ndarray, size: int = 160) -> np.ndarray:
-    crop = _crop_inner(crop_bgr, pad_ratio=0.18)
-    crop = cv2.resize(crop, (size, size), interpolation=cv2.INTER_AREA)
-    return crop
+    return _letterbox_to_square(crop_bgr, size=size, bg_bgr=(127, 127, 127))
 
+def _alpha_bbox(img_rgba: np.ndarray):
+    if img_rgba is None or len(img_rgba.shape) != 3 or img_rgba.shape[2] < 4:
+        return None
+
+    alpha = img_rgba[:, :, 3]
+    ys, xs = np.where(alpha > 8)
+    if len(xs) == 0 or len(ys) == 0:
+        return None
+
+    x1 = int(xs.min())
+    x2 = int(xs.max()) + 1
+    y1 = int(ys.min())
+    y2 = int(ys.max()) + 1
+    return x1, y1, x2, y2
 
 def _render_ref_view(
     ref_png_path: str,
@@ -467,9 +789,16 @@ def _render_ref_view(
     if img is None:
         return None
 
-    bg = RARITY_BG.get(int(rarity or 1), (128, 128, 128))
-    canvas = np.full((size, size, 3), bg, dtype=np.uint8)
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
 
+    if img.shape[2] == 4:
+        bbox = _alpha_bbox(img)
+        if bbox is not None:
+            x1, y1, x2, y2 = bbox
+            img = img[y1:y2, x1:x2].copy()
+
+    bg = (127, 127, 127)
     img = _alpha_composite_to_bg(img, bg)
     if img is None:
         return None
@@ -480,6 +809,8 @@ def _render_ref_view(
     h, w = img.shape[:2]
     if h < 2 or w < 2:
         return None
+
+    canvas = np.full((size, size, 3), bg, dtype=np.uint8)
 
     target = int(size * scale)
     scale_k = min(target / float(w), target / float(h))
@@ -579,20 +910,15 @@ def _score_crop_vs_ref(crop_bgr: np.ndarray, ref_bgr: np.ndarray) -> tuple[float
     edge = _iou(crop_edges, ref_edges)
     mask = _iou(crop_mask, ref_mask)
     patch = _patch_score(crop_bgr, ref_bgr)
-    color = _color_score(crop_bgr, ref_bgr)
 
     score = (
-        0.40 * edge +
-        0.30 * mask +
-        0.20 * patch +
-        0.10 * color
+        0.60 * edge +
+        0.40 * patch
     )
 
     return float(score), {
         "edge": float(edge),
-        "mask": float(mask),
         "patch": float(patch),
-        "color": float(color),
     }
 
 
@@ -611,7 +937,7 @@ def match_weapon_crop(
             top1=0.0,
             top2=0.0,
             accepted=False,
-            method="dino_index_rerank",
+            method="dino_index_masked_rerank",
             extra={"reason": "empty_input"},
         )
 
@@ -620,7 +946,7 @@ def match_weapon_crop(
         candidate_ids=candidate_ids,
         emb_index=emb_index,
         size=size,
-        top_n=5,
+        top_n=10,
     )
 
     if not top_retrieval:
@@ -629,59 +955,146 @@ def match_weapon_crop(
             top1=0.0,
             top2=0.0,
             accepted=False,
-            method="dino_index_rerank",
+            method="dino_index_masked_rerank",
             extra={"reason": "no_retrieval_candidates"},
         )
 
     crop_prep = _prepare_crop_for_match(crop_bgr, size=size)
 
+    retrieval_margin = 1.0
+    if len(top_retrieval) >= 2:
+        retrieval_margin = float(top_retrieval[0][1] - top_retrieval[1][1])
+
+    top_n_rerank = 5 if retrieval_margin >= 0.06 else min(10, len(top_retrieval))
+
     reranked = []
 
-    for wid, emb_sim in top_retrieval:
+    for wid, emb_sim in top_retrieval[:top_n_rerank]:
         ref_path = _p(cache_weapons_dir, f"{wid}.png")
         wrarity = weaps_db.get(str(wid), {}).get("rarity", rarity)
 
-        local_best = -1.0
-        local_extra = {}
+        cand_score, cand_extra = _score_candidate_masked(
+            crop_bgr=crop_prep,
+            ref_png_path=ref_path,
+            rarity=wrarity,
+            size=size,
+            emb_sim=float(emb_sim),
+        )
 
-        for _, ref_view in _make_ref_views(ref_path, rarity=wrarity, size=size):
-            local_score, score_extra = _score_crop_vs_ref(crop_prep, ref_view)
-            final_score = 0.70 * float(emb_sim) + 0.30 * float(local_score)
+        reranked.append((str(wid), float(cand_score), cand_extra))
 
-            if final_score > local_best:
-                local_best = final_score
-                local_extra = {
-                    "emb_sim": float(emb_sim),
-                    "local_score": float(local_score),
-                    **score_extra,
-                }
-
-        reranked.append((str(wid), float(local_best), local_extra))
+    if not reranked:
+        return MatchDecision(
+            best_id=None,
+            top1=0.0,
+            top2=0.0,
+            accepted=False,
+            method="dino_index_masked_rerank",
+            extra={"reason": "rerank_empty", "retrieval_top": top_retrieval},
+        )
 
     reranked.sort(key=lambda x: x[1], reverse=True)
+    retrieval_best_id = str(top_retrieval[0][0])
+    reranked_by_id = {wid: (score, extra) for wid, score, extra in reranked}
+
+    guard_applied = False
 
     best_id = reranked[0][0]
     best_score = reranked[0][1]
     best_extra = reranked[0][2]
 
-    second_score = reranked[1][1] if len(reranked) > 1 else 0.0
-    margin = best_score - second_score
+    retrieval_best_sim = float(top_retrieval[0][1])
 
-    accepted = (
-        best_id is not None
-        and best_score >= 0.58
-        and margin >= 0.03
+    if (
+            retrieval_best_id in reranked_by_id
+            and (
+            retrieval_margin >= 0.03
+            or retrieval_best_sim >= 0.70
     )
+    ):
+        r_score, r_extra = reranked_by_id[retrieval_best_id]
+
+        if best_id != retrieval_best_id:
+            appearance_gap = float(best_extra.get("appearance_score", 0.0)) - float(
+                r_extra.get("appearance_score", 0.0)
+            )
+            align_gap = float(best_extra.get("align_score", 0.0)) - float(
+                r_extra.get("align_score", 0.0)
+            )
+            score_gap = float(best_score - r_score)
+
+            # retrieval почти всегда лучше по форме; rerank разрешаем переворот
+            # только если он очень явно доминирует
+            if not (
+                    appearance_gap >= 0.12
+                    and align_gap >= 0.015
+                    and score_gap >= 0.05
+            ):
+                best_id = retrieval_best_id
+                best_score = float(r_score)
+                best_extra = r_extra
+                guard_applied = True
+
+    second_score = 0.0
+    for wid, score, extra in reranked:
+        if wid != best_id:
+            second_score = float(score)
+            break
+
+    if guard_applied:
+        margin = float(retrieval_margin)
+    else:
+        margin = float(best_score - second_score)
+
+    retrieval_best_id = str(top_retrieval[0][0])
+    retrieval_best_sim = float(top_retrieval[0][1])
+
+    if guard_applied:
+        accepted = (
+                best_id is not None
+                and rarity is not None
+                and retrieval_best_sim >= 0.60
+        )
+    else:
+        accepted = (
+                best_id is not None
+                and rarity is not None
+                and (
+                        margin >= 0.02
+                        or (
+                                best_extra.get("appearance_score", 0.0) >= 0.72
+                                and best_extra.get("align_score", 0.0) >= 0.055
+                        )
+                        or (
+                                best_id == retrieval_best_id
+                                and retrieval_best_sim >= 0.54
+                                and best_extra.get("align_score", 0.0) >= 0.04
+                        )
+                )
+        )
 
     return MatchDecision(
         best_id=best_id,
         top1=float(best_score),
         top2=float(second_score),
         accepted=bool(accepted),
-        method="dino_index_rerank",
+        method="dino_index_masked_rerank",
         extra={
             "margin": float(margin),
-            "retrieval_top": [{"id": wid, "score": score} for wid, score in top_retrieval],
+            "retrieval_margin": float(retrieval_margin),
+            "rerank_top_n": int(top_n_rerank),
+            "guard_applied": bool(guard_applied),
+            "retrieval_top": [{"id": wid, "score": float(score)} for wid, score in top_retrieval],
+            "reranked_top": [
+                {
+                    "id": wid,
+                    "score": float(score),
+                    "emb_sim": float(extra.get("emb_sim", 0.0)),
+                    "align_score": float(extra.get("align_score", 0.0)),
+                    "appearance_score": float(extra.get("appearance_score", 0.0)),
+                }
+                for wid, score, extra in reranked
+            ],
             **best_extra,
         },
     )
@@ -812,6 +1225,7 @@ def match_weapons(
             "skipped_no_weapon_type": 0,
             "skipped_no_crop": 0,
             "skipped_no_candidates": 0,
+            "skipped_low_rarity": 0,
             "pairs_total": 0,
             "debug_dir": debug_dir,
             "method": "dino_index_rerank",
@@ -827,6 +1241,7 @@ def match_weapons(
     skipped_no_weapon_type = 0
     skipped_no_crop = 0
     skipped_no_candidates = 0
+    skipped_low_rarity = 0
 
     pairs = parsed.get("pairs", [])
     if not pairs:
@@ -838,9 +1253,10 @@ def match_weapons(
             "skipped_no_weapon_type": 0,
             "skipped_no_crop": 0,
             "skipped_no_candidates": 0,
+            "skipped_low_rarity": 0,
             "pairs_total": 0,
             "debug_dir": debug_dir,
-            "method": "edge_mask_mv",
+            "method": "dino_index_rerank",
             "note": "pairs_empty",
         }
 
@@ -869,13 +1285,18 @@ def match_weapons(
 
         rarity = detect_weapon_rarity_from_crop(crop_bgr)
         if rarity in (1, 2):
+            skipped_low_rarity += 1
             continue
+
         candidate_ids = get_candidate_ids(
             weapon_type=str(weapon_type),
             rarity=rarity,
             type_rarity_to_ids=type_rarity_to_ids,
             weaps_db=weaps_db,
         )
+        if weapon_crop_name == "weapon_017.png":
+            print("DEBUG weapon_017 candidate_ids contains 15426:", "15426" in candidate_ids)
+            print("DEBUG weapon_017 candidate_ids sample:", candidate_ids[:20], "total=", len(candidate_ids))
 
         if not candidate_ids:
             skipped_no_candidates += 1
@@ -887,7 +1308,7 @@ def match_weapons(
                     top1=0.0,
                     top2=0.0,
                     accepted=False,
-                    method="edge_mask_mv",
+                    method="dino_index_rerank",
                     extra={"reason": "no_candidates"},
                 ),
                 weapon_type=str(weapon_type),
@@ -906,7 +1327,7 @@ def match_weapons(
                     top1=0.0,
                     top2=0.0,
                     accepted=False,
-                    method="edge_mask_mv",
+                    method="dino_index_rerank",
                     extra={"reason": "singleton_bucket", "candidate_ids": candidate_ids},
                 ),
                 weapon_type=str(weapon_type),
@@ -949,14 +1370,18 @@ def match_weapons(
             cache_weapons_dir=cache_weapons_dir,
         )
 
-        if copy_weapon_hd_from_cache(
+        dst = _p(out_hd_weap_dir, f"{decision.best_id}.png")
+        existed_before = os.path.exists(dst)
+
+        copied_ok = copy_weapon_hd_from_cache(
             best_id=decision.best_id,
             out_hd_weap_dir=out_hd_weap_dir,
             cache_dir=cache_weapons_dir,
-        ):
-            dst = _p(out_hd_weap_dir, f"{decision.best_id}.png")
-            if os.path.exists(dst):
-                accepted_new_hd += 1
+        )
+
+        exists_after = os.path.exists(dst)
+        if copied_ok and (not existed_before) and exists_after:
+            accepted_new_hd += 1
 
     return {
         "accepted_new_hd": accepted_new_hd,
@@ -966,7 +1391,8 @@ def match_weapons(
         "skipped_no_weapon_type": skipped_no_weapon_type,
         "skipped_no_crop": skipped_no_crop,
         "skipped_no_candidates": skipped_no_candidates,
+        "skipped_low_rarity": skipped_low_rarity,
         "pairs_total": len(pairs),
         "debug_dir": debug_dir,
-        "method": "edge_mask_mv",
+        "method": "dino_index_rerank",
     }
