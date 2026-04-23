@@ -524,6 +524,18 @@ class ClaymoreReferenceReframer:
     TARGET_CLAYMORE_LENGTH = 309.0
     TARGET_TOP_ENDPOINT_X = 226.0
     TARGET_BOTTOM_Y = 255.0
+    IDENTITY_PROTOTYPE_IDS = {
+        "12406",
+        "12408",
+        "12409",
+        "12412",
+        "12430",
+        "12432",
+        "12433",
+        "12512",
+        "12514",
+    }
+    IDENTITY_DISTANCE_THRESHOLD = 0.25
 
     WINDOW_PROTOTYPES = {
         "12101": {
@@ -563,24 +575,31 @@ class ClaymoreReferenceReframer:
         },
         "12402": {
             "features": [0.165868, 0.287448, 0.521333, 35.259705, 1.158901, 0.468085, 0.496053, 0.619048, 0.566275, 0.579986, 1.97662],
-            "center": 0.513,
-            "span": 0.575,
-            "length": 299.33,
-            "midpoint": [116.5, 131.0],
+            "center": 0.515,
+            "span": 0.77,
+            "length": 332.9,
+            "midpoint": [121.0, 127.5],
         },
         "12405": {
             "features": [0.144481, 0.346486, 0.482711, 52.50169, 1.04676, 0.361702, 0.509245, 0.603175, 0.553658, 0.612366, 2.165838],
             "center": 0.5,
-            "span": 0.95,
-            "length": 331.23,
-            "midpoint": [119.0, 133.0],
+            "span": 0.98,
+            "length": 341.4,
+            "midpoint": [124.5, 127.5],
         },
         "12406": {
             "features": [0.176909, 0.3045, 0.529603, 46.534206, 1.096627, 0.510638, 0.52175, 0.603175, 0.563936, 0.517923, 1.757437],
-            "center": 0.495,
-            "span": 0.88,
-            "length": 340.07,
-            "midpoint": [122.5, 127.5],
+            "center": 0.5,
+            "span": 0.99,
+            "length": 332.26,
+            "midpoint": [119.5, 127.5],
+        },
+        "12408": {
+            "features": [0.17722, 0.305341, 0.528829, 46.581318, 1.099086, 0.510638, 0.539623, 0.603175, 0.563592, 0.517253, 1.752378],
+            "center": 0.5,
+            "span": 0.99,
+            "length": 332.26,
+            "midpoint": [119.5, 127.5],
         },
         "12409": {
             "features": [0.082088, 0.242042, 0.533132, 67.235092, 0.95354, 0.531915, 0.552358, 0.539683, 0.577096, 0.754204, 2.170608],
@@ -589,12 +608,26 @@ class ClaymoreReferenceReframer:
             "length": 310.0,
             "midpoint": [127.5, 131.0],
         },
+        "12410": {
+            "features": [0.140932, 0.342428, 0.48655, 51.599461, 1.040018, 0.361702, 0.522934, 0.555556, 0.556168, 0.617702, 2.181049],
+            "center": 0.5,
+            "span": 0.97,
+            "length": 340.74,
+            "midpoint": [126.0, 127.5],
+        },
         "12412": {
             "features": [0.263231, 0.384202, 0.475594, 38.914619, 1.44314, 0.468085, 0.513754, 0.68254, 0.525391, 0.329032, 1.514687],
             "center": 0.5125,
             "span": 0.975,
             "length": 253.31,
             "midpoint": [117.0, 166.0],
+        },
+        "12414": {
+            "features": [0.232273, 0.445692, 0.395647, 45.90316, 0.971659, 0.382979, 0.484865, 0.571429, 0.512464, 0.571513, 2.307165],
+            "center": 0.5,
+            "span": 0.97,
+            "length": 324.69,
+            "midpoint": [130.5, 127.5],
         },
         "12415": {
             "features": [0.150972, 0.277277, 0.546878, 27.714783, 1.148979, 0.553191, 0.510216, 0.666667, 0.563378, 0.583898, 2.226512],
@@ -605,17 +638,24 @@ class ClaymoreReferenceReframer:
         },
         "12417": {
             "features": [0.173224, 0.392424, 0.453379, 33.86739, 1.098511, 0.404255, 0.492805, 0.634921, 0.545604, 0.591254, 2.175574],
-            "center": 0.44,
-            "span": 0.816,
-            "length": 341.4,
-            "midpoint": [126.5, 127.5],
+            "center": 0.425,
+            "span": 0.8,
+            "length": 340.07,
+            "midpoint": [125.5, 127.5],
+        },
+        "12418": {
+            "features": [0.14854, 0.233611, 0.529691, 39.652779, 0.969499, 0.489362, 0.518492, 0.650794, 0.563722, 0.695792, 2.630524],
+            "center": 0.55,
+            "span": 0.78,
+            "length": 330.34,
+            "midpoint": [127.0, 127.5],
         },
         "12424": {
             "features": [0.18173, 0.281805, 0.554959, 34.359905, 1.183723, 0.425532, 0.546835, 0.603175, 0.574993, 0.484487, 1.797893],
-            "center": 0.465,
-            "span": 0.83,
-            "length": 338.1,
-            "midpoint": [128.0, 127.5],
+            "center": 0.525,
+            "span": 0.94,
+            "length": 337.44,
+            "midpoint": [114.5, 127.5],
         },
         "12430": {
             "features": [0.180936, 0.230559, 0.645218, 34.575542, 0.830196, 0.617021, 0.537038, 0.714286, 0.573177, 0.705588, 2.739482],
@@ -638,12 +678,26 @@ class ClaymoreReferenceReframer:
             "length": 314.41,
             "midpoint": [116.0, 137.0],
         },
+        "12433": {
+            "features": [0.154867, 0.345645, 0.466117, 64.000313, 1.037283, 0.468085, 0.520892, 0.571429, 0.546873, 0.653797, 1.888607],
+            "center": 0.5,
+            "span": 0.99,
+            "length": 336.79,
+            "midpoint": [115.0, 127.5],
+        },
+        "12511": {
+            "features": [0.118579, 0.224393, 0.545777, 39.049625, 1.035082, 0.531915, 0.517628, 0.634921, 0.579745, 0.677413, 2.546562],
+            "center": 0.565,
+            "span": 0.85,
+            "length": 330.98,
+            "midpoint": [121.5, 127.5],
+        },
         "12512": {
             "features": [0.339372, 0.606559, 0.223861, 74.310173, 0.650324, 0.382979, 0.450051, 0.571429, 0.432113, 0.784099, 2.4233],
             "center": 0.5,
-            "span": 0.9,
-            "length": 259.48,
-            "midpoint": [113.0, 143.5],
+            "span": 1.0,
+            "length": 298.29,
+            "midpoint": [123.5, 133.5],
         },
         "12513": {
             "features": [0.151477, 0.30052, 0.530715, 38.131775, 0.924538, 0.425532, 0.520476, 0.650794, 0.573706, 0.533291, 1.919427],
@@ -655,31 +709,37 @@ class ClaymoreReferenceReframer:
         "12514": {
             "features": [0.186268, 0.382647, 0.482708, 59.058956, 1.01962, 0.404255, 0.519508, 0.555556, 0.549414, 0.563726, 1.912725],
             "center": 0.5,
-            "span": 0.95,
-            "length": 321.05,
-            "midpoint": [123.5, 127.5],
+            "span": 0.99,
+            "length": 329.71,
+            "midpoint": [124.5, 127.5],
         },
     }
     VARIANT_BENCHMARK_TARGETS = {
         "12101": {"center": 0.488, "span": 0.575, "length": 335.94, "midpoint": [132.5, 115.5]},
         "12401": {"center": 0.513, "span": 0.925, "length": 316.24, "midpoint": [120.5, 135.5]},
-        "12402": {"center": 0.513, "span": 0.575, "length": 299.33, "midpoint": [116.5, 131.0]},
-        "12405": {"center": 0.500, "span": 0.950, "length": 331.23, "midpoint": [119.0, 133.0]},
-        "12406": {"center": 0.495, "span": 0.880, "length": 340.07, "midpoint": [122.5, 127.5]},
+        "12402": {"center": 0.515, "span": 0.770, "length": 332.90, "midpoint": [121.0, 127.5]},
+        "12405": {"center": 0.500, "span": 0.980, "length": 341.40, "midpoint": [124.5, 127.5]},
+        "12406": {"center": 0.500, "span": 0.990, "length": 332.26, "midpoint": [119.5, 127.5]},
+        "12408": {"center": 0.500, "span": 0.990, "length": 332.26, "midpoint": [119.5, 127.5]},
         "12409": {"center": 0.525, "span": 0.950, "length": 310.00, "midpoint": [127.5, 131.0]},
+        "12410": {"center": 0.500, "span": 0.970, "length": 340.74, "midpoint": [126.0, 127.5]},
         "12412": {"center": 0.5125, "span": 0.975, "length": 253.31, "midpoint": [117.0, 166.0]},
+        "12414": {"center": 0.500, "span": 0.970, "length": 324.69, "midpoint": [130.5, 127.5]},
         "12415": {"center": 0.5375, "span": 0.575, "length": 293.51, "midpoint": [132.5, 118.0]},
-        "12417": {"center": 0.440, "span": 0.816, "length": 341.40, "midpoint": [126.5, 127.5]},
-        "12424": {"center": 0.465, "span": 0.830, "length": 338.10, "midpoint": [128.0, 127.5]},
+        "12417": {"center": 0.425, "span": 0.800, "length": 340.07, "midpoint": [125.5, 127.5]},
+        "12418": {"center": 0.550, "span": 0.780, "length": 330.34, "midpoint": [127.0, 127.5]},
+        "12424": {"center": 0.525, "span": 0.940, "length": 337.44, "midpoint": [114.5, 127.5]},
         "12430": {"center": 0.538, "span": 0.925, "length": 392.19, "midpoint": [124.5, 101.0]},
         "12431": {"center": 0.488, "span": 0.725, "length": 282.97, "midpoint": [139.5, 119.0]},
         "12432": {"center": 0.5125, "span": 0.975, "length": 314.41, "midpoint": [116.0, 137.0]},
+        "12433": {"center": 0.500, "span": 0.990, "length": 336.79, "midpoint": [115.0, 127.5]},
+        "12511": {"center": 0.565, "span": 0.850, "length": 330.98, "midpoint": [121.5, 127.5]},
         "12513": {"center": 0.363, "span": 0.725, "length": 331.61, "midpoint": [136.0, 111.0]},
-        "12514": {"center": 0.500, "span": 0.950, "length": 321.05, "midpoint": [123.5, 127.5]},
+        "12514": {"center": 0.500, "span": 0.990, "length": 329.71, "midpoint": [124.5, 127.5]},
         "12301": {"center": 0.4875, "span": 0.975, "length": 329.61, "midpoint": [124.5, 125.0]},
         "12302": {"center": 0.450, "span": 0.550, "length": 312.43, "midpoint": [126.0, 122.0]},
         "12305": {"center": 0.5125, "span": 0.975, "length": 331.0, "midpoint": [118.5, 120.0]},
-        "12512": {"center": 0.500, "span": 0.900, "length": 259.48, "midpoint": [113.0, 143.5]},
+        "12512": {"center": 0.500, "span": 1.000, "length": 298.29, "midpoint": [123.5, 133.5]},
     }
     PROTOTYPE_FEATURE_SCALES = np.array(
         [0.05, 0.05, 0.05, 8.0, 0.09, 0.05, 0.05, 0.08, 0.05, 0.08, 0.25],
@@ -721,6 +781,14 @@ class ClaymoreReferenceReframer:
             list(self.WINDOW_PROTOTYPES.keys()),
             "exemplar",
         )
+        if self._should_use_identity_bucket(params):
+            return {
+                "family": f"identity_bucket[{params['nearest_id']}]",
+                "mode": "identity",
+                "nearest_id": str(params["nearest_id"]),
+                "nearest_distance": float(params["nearest_distance"]),
+                "max_weight": float(params["max_weight"]),
+            }
         # For unseen claymores, a small amount of extra visible span is safer
         # than over-cropping. Known calibrated cases converge to max_weight≈1,
         # so this leaves them unchanged while slightly broadening ambiguous refs.
@@ -742,7 +810,16 @@ class ClaymoreReferenceReframer:
             params["center"] = float(min(float(params["center"]) + 0.012, 0.56))
             params["span"] = float(min(float(params["span"]) + 0.06, 0.80))
             params["family"] += ", lower_blade_guard"
+        params["mode"] = "window"
         return params
+
+    def _should_use_identity_bucket(self, params: dict) -> bool:
+        nearest_id = str(params.get("nearest_id", ""))
+        nearest_distance = float(params.get("nearest_distance", np.inf))
+        return (
+            nearest_id in self.IDENTITY_PROTOTYPE_IDS
+            and nearest_distance <= self.IDENTITY_DISTANCE_THRESHOLD
+        )
 
     def _saliency_profile_metrics(self, object_bgra: np.ndarray, bins: int = 64) -> dict:
         if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
@@ -832,6 +909,9 @@ class ClaymoreReferenceReframer:
 
     def reframe_window_autonomous(self, object_bgra: np.ndarray) -> tuple[np.ndarray, dict]:
         params = self.select_window_params(object_bgra)
+        if params.get("mode") == "identity":
+            return object_bgra.copy(), params
+
         out = self.reframe_window(
             object_bgra,
             target_midpoint=params["midpoint"],
@@ -1076,6 +1156,8 @@ class ClaymoreReferenceReframer:
 
         rows.sort(key=lambda item: item[0])
         selected = rows[: min(self.PROTOTYPE_K, len(rows))]
+        nearest_distance = float(selected[0][0]) if selected else float("inf")
+        nearest_id = str(selected[0][1]) if selected else ""
 
         distances = np.array([row[0] for row in selected], dtype=np.float32)
         d0 = float(distances.min()) if len(distances) > 0 else 0.0
@@ -1102,6 +1184,8 @@ class ClaymoreReferenceReframer:
             "span": float(span),
             "length": float(length),
             "midpoint": midpoint.astype(np.float32),
+            "nearest_id": nearest_id,
+            "nearest_distance": nearest_distance,
             "max_weight": float(weights.max()) if len(weights) else 1.0,
         }
 
@@ -1110,6 +1194,7 @@ class PolearmReferenceReframer(SwordReferenceReframer):
     TARGET_SWORD_LENGTH = 292.0
     TARGET_TOP_ENDPOINT_X = 222.0
     TARGET_BOTTOM_Y = 255.0
+    TARGET_TOP_MARGIN_Y = 2.0
 
     MIN_SCALE = 0.30
     MAX_SCALE = 1.60
@@ -1117,28 +1202,58 @@ class PolearmReferenceReframer(SwordReferenceReframer):
     MIN_CUT_RATIO = 0.00
     MAX_CUT_RATIO = 0.30
 
-    PROTOTYPE_FEATURE_SCALES = np.array([0.05, 0.06, 0.05, 8.0, 0.12], dtype=np.float32)
-    PROTOTYPE_SIGMA = 0.35
-    PROTOTYPE_K = 4
+    FEATURE_SCALES = np.array([0.05, 0.06, 0.05, 8.0, 0.12], dtype=np.float32)
 
-    PROTOTYPES = {
-        "13511": {"features": [0.439907, 0.604186, 0.141014, 28.664707, 1.243745], "cut": 0.22, "length": 280.0, "top_x": 216.0},
-        "13501": {"features": [0.406259, 0.623069, 0.120657, 36.307171, 0.939473], "cut": 0.16, "length": 296.0, "top_x": 222.0},
-        "13514": {"features": [0.323273, 0.442837, 0.191236, 45.957703, 0.878663], "cut": 0.02, "length": 296.0, "top_x": 228.0},
-        "13426": {"features": [0.624539, 0.727357, 0.114810, 57.364456, 0.845045], "cut": 0.00, "length": 256.0, "top_x": 210.0},
-        "13414": {"features": [0.288578, 0.395582, 0.169720, 40.011082, 0.773317], "cut": 0.20, "length": 304.0, "top_x": 222.0},
-        "13415": {"features": [0.316499, 0.490834, 0.180405, 36.570786, 0.775634], "cut": 0.00, "length": 280.0, "top_x": 230.0},
-        "13507": {"features": [0.295904, 0.544451, 0.170976, 27.466476, 0.834979], "cut": 0.28, "length": 296.0, "top_x": 234.0},
-        "13424": {"features": [0.383434, 0.656382, 0.164512, 34.849743, 0.754313], "cut": 0.16, "length": 288.0, "top_x": 222.0},
-        "13403": {"features": [0.207275, 0.467068, 0.214808, 19.684872, 0.774870], "cut": 0.28, "length": 312.0, "top_x": 234.0},
-        "13404": {"features": [0.283807, 0.547301, 0.192590, 25.818962, 0.681046], "cut": 0.24, "length": 296.0, "top_x": 228.0},
-        "13402": {"features": [0.242189, 0.334719, 0.249028, 34.518402, 0.721668], "cut": 0.04, "length": 296.0, "top_x": 228.0},
-        "13416": {"features": [0.345537, 0.461264, 0.245852, 20.693382, 1.142021], "cut": 0.28, "length": 264.0, "top_x": 234.0},
-        "13509": {"features": [0.295957, 0.375990, 0.248020, 29.067814, 0.790845], "cut": 0.02, "length": 288.0, "top_x": 234.0},
-        "13406": {"features": [0.387725, 0.546645, 0.183961, 16.868135, 1.201162], "cut": 0.28, "length": 312.0, "top_x": 234.0},
-        "13405": {"features": [0.389880, 0.654380, 0.149690, 29.563349, 0.846707], "cut": 0.28, "length": 296.0, "top_x": 228.0},
-        "13431": {"features": [0.308500, 0.468002, 0.129824, 36.812336, 0.739592], "cut": 0.10, "length": 300.0, "top_x": 230.0},
-        "13515": {"features": [0.478033, 0.665133, 0.112027, 64.990166, 1.019545], "cut": 0.055, "length": 294.0, "top_x": 216.0},
+    WINDOW_SIGMA = 0.35
+    WINDOW_K = 4
+    CUT_BUCKET_SIGMA = 0.45
+
+    CUT_BUCKET_VALUES = {
+        "zero": 0.00,
+        "light": 0.18,
+        "strong": 0.26,
+    }
+    ZERO_TO_LIGHT_DISTANCE_GAP = 0.28
+    ZERO_TO_LIGHT_MIN_DISTANCE = 1.0
+
+    WINDOW_PROTOTYPES = {
+        "13402": {"features": [0.242189, 0.334719, 0.249028, 34.518402, 0.721668], "length": 302.7111, "top_x": 223.0},
+        "13403": {"features": [0.207275, 0.467068, 0.214808, 19.684872, 0.774870], "length": 301.5593, "top_x": 220.0},
+        "13404": {"features": [0.283807, 0.547301, 0.192590, 25.818962, 0.681046], "length": 300.7408, "top_x": 220.0},
+        "13405": {"features": [0.389880, 0.654380, 0.149690, 29.563349, 0.846707], "length": 306.8941, "top_x": 226.0},
+        "13406": {"features": [0.387725, 0.546645, 0.183961, 16.868135, 1.201162], "length": 310.0403, "top_x": 226.0},
+        "13414": {"features": [0.288578, 0.395582, 0.169720, 40.011082, 0.773317], "length": 305.4996, "top_x": 216.0},
+        "13416": {"features": [0.345537, 0.461264, 0.245852, 20.693382, 1.142021], "length": 317.9701, "top_x": 245.0},
+        "13424": {"features": [0.383434, 0.656382, 0.164512, 34.849743, 0.754313], "length": 299.3476, "top_x": 215.0},
+        "13426": {"features": [0.624539, 0.727357, 0.114810, 57.364456, 0.845045], "length": 265.1886, "top_x": 206.0},
+        "13431": {"features": [0.308500, 0.468002, 0.129824, 36.812336, 0.739592], "length": 302.3789, "top_x": 219.0},
+        "13501": {"features": [0.406259, 0.623069, 0.120657, 36.307171, 0.939473], "length": 304.6079, "top_x": 224.0},
+        "13507": {"features": [0.295904, 0.544451, 0.170976, 27.466476, 0.834979], "length": 304.9213, "top_x": 222.0},
+        "13509": {"features": [0.295957, 0.375990, 0.248020, 29.067814, 0.790845], "length": 318.5781, "top_x": 245.0},
+        "13511": {"features": [0.439907, 0.604186, 0.141014, 28.664707, 1.243745], "length": 293.4246, "top_x": 215.0},
+        "13514": {"features": [0.323273, 0.442837, 0.191236, 45.957703, 0.878663], "length": 299.8166, "top_x": 214.0},
+    }
+
+    CUT_BUCKET_PROTOTYPES = {
+        "13402": {"features": [0.242189, 0.334719, 0.249028, 34.518402, 0.721668], "bucket": "zero"},
+        "13403": {"features": [0.207275, 0.467068, 0.214808, 19.684872, 0.774870], "bucket": "strong"},
+        "13404": {"features": [0.283807, 0.547301, 0.192590, 25.818962, 0.681046], "bucket": "light"},
+        "13405": {"features": [0.389880, 0.654380, 0.149690, 29.563349, 0.846707], "bucket": "strong"},
+        "13406": {"features": [0.387725, 0.546645, 0.183961, 16.868135, 1.201162], "bucket": "strong"},
+        "13414": {"features": [0.288578, 0.395582, 0.169720, 40.011082, 0.773317], "bucket": "light"},
+        "13415": {"features": [0.316499, 0.490834, 0.180405, 36.570786, 0.775634], "bucket": "zero"},
+        "13416": {"features": [0.345537, 0.461264, 0.245852, 20.693382, 1.142021], "bucket": "zero"},
+        "13424": {"features": [0.383434, 0.656382, 0.164512, 34.849743, 0.754313], "bucket": "light"},
+        "13426": {"features": [0.624539, 0.727357, 0.114810, 57.364456, 0.845045], "bucket": "zero"},
+        "13431": {"features": [0.308500, 0.468002, 0.129824, 36.812336, 0.739592], "bucket": "zero"},
+        "13501": {"features": [0.406259, 0.623069, 0.120657, 36.307171, 0.939473], "bucket": "light"},
+        "13507": {"features": [0.295904, 0.544451, 0.170976, 27.466476, 0.834979], "bucket": "strong"},
+        "13509": {"features": [0.295957, 0.375990, 0.248020, 29.067814, 0.790845], "bucket": "zero"},
+        "13511": {"features": [0.439907, 0.604186, 0.141014, 28.664707, 1.243745], "bucket": "light"},
+        "13513": {"features": [0.248520, 0.463716, 0.221497, 54.809860, 0.800749], "bucket": "zero"},
+        "13514": {"features": [0.323273, 0.442837, 0.191236, 45.957703, 0.878663], "bucket": "zero"},
+        "13515": {"features": [0.478033, 0.665133, 0.112027, 64.990166, 1.019545], "bucket": "zero"},
+        "13516": {"features": [0.210569, 0.368142, 0.298003, 106.849213, 0.707642], "bucket": "zero"},
     }
 
     def _feature_vec(self, object_bgra: np.ndarray) -> np.ndarray:
@@ -1154,38 +1269,91 @@ class PolearmReferenceReframer(SwordReferenceReframer):
             dtype=np.float32,
         )
 
-    def _blend_from_prototypes(self, feature_vec: np.ndarray) -> dict:
+    def _blend_window_from_prototypes(self, feature_vec: np.ndarray) -> dict:
         rows = []
-        for proto_id, proto in self.PROTOTYPES.items():
+        for proto_id, proto in self.WINDOW_PROTOTYPES.items():
             proto_feat = np.array(proto["features"], dtype=np.float32)
-            dist = np.linalg.norm((feature_vec - proto_feat) / self.PROTOTYPE_FEATURE_SCALES)
+            dist = np.linalg.norm((feature_vec - proto_feat) / self.FEATURE_SCALES)
             rows.append((float(dist), proto_id, proto))
 
         rows.sort(key=lambda item: item[0])
-        selected = rows[: min(self.PROTOTYPE_K, len(rows))]
+        selected = rows[: min(self.WINDOW_K, len(rows))]
 
         distances = np.array([row[0] for row in selected], dtype=np.float32)
         d0 = float(distances.min()) if len(distances) > 0 else 0.0
         rel_distances = np.maximum(distances - d0, 0.0)
-        weights = np.exp(-0.5 * (rel_distances / self.PROTOTYPE_SIGMA) ** 2)
+        weights = np.exp(-0.5 * (rel_distances / self.WINDOW_SIGMA) ** 2)
         weights = weights / np.maximum(weights.sum(), 1e-6)
 
-        cut = 0.0
         length = 0.0
         top_x = 0.0
         family_parts: list[str] = []
         for weight, (_, proto_id, proto) in zip(weights.tolist(), selected):
-            cut += weight * float(proto["cut"])
             length += weight * float(proto["length"])
             top_x += weight * float(proto["top_x"])
             family_parts.append(f"{proto_id}:{weight:.2f}")
 
         return {
-            "family": "polearm[" + ", ".join(family_parts) + "]",
-            "cut": float(cut),
+            "family": "window[" + ", ".join(family_parts) + "]",
             "length": float(length),
             "top_x": float(top_x),
+            "nearest_id": selected[0][1] if selected else "",
+            "nearest_distance": float(selected[0][0]) if selected else 0.0,
             "max_weight": float(weights.max()) if len(weights) else 1.0,
+        }
+
+    def _select_cut_bucket(self, feature_vec: np.ndarray) -> dict:
+        bucket_rows: dict[str, tuple[float, str, float]] = {}
+        family_rows = []
+
+        for proto_id, proto in self.CUT_BUCKET_PROTOTYPES.items():
+            proto_feat = np.array(proto["features"], dtype=np.float32)
+            dist = float(np.linalg.norm((feature_vec - proto_feat) / self.FEATURE_SCALES))
+            score = float(np.exp(-0.5 * (dist / self.CUT_BUCKET_SIGMA) ** 2))
+            bucket = str(proto["bucket"])
+            family_rows.append((score, proto_id, bucket))
+
+            prev = bucket_rows.get(bucket)
+            if prev is None or score > prev[2]:
+                bucket_rows[bucket] = (dist, proto_id, score)
+
+        winner = min(
+            bucket_rows.items(),
+            key=lambda item: (item[1][0], float(self.CUT_BUCKET_VALUES[item[0]])),
+        )
+        bucket = str(winner[0])
+        nearest_distance, nearest_id, best_score = winner[1]
+
+        # Some slender mid-crop polearms sit on the boundary between the
+        # conservative zero bucket and the regular light bucket. When zero only
+        # wins by a tiny margin against light, prefer light so we do not leave
+        # too much unused shaft in frame.
+        zero_row = bucket_rows.get("zero")
+        light_row = bucket_rows.get("light")
+        if zero_row is not None and light_row is not None:
+            zero_distance, zero_id, _ = zero_row
+            light_distance, light_id, _ = light_row
+            if (
+                bucket == "zero"
+                and zero_id in {"13415", "13431"}
+                and zero_distance >= self.ZERO_TO_LIGHT_MIN_DISTANCE
+                and light_distance <= zero_distance + self.ZERO_TO_LIGHT_DISTANCE_GAP
+            ):
+                bucket = "light"
+                nearest_distance = float(light_distance)
+                nearest_id = str(light_id)
+                best_score = float(light_row[2])
+
+        family_rows.sort(key=lambda item: item[0], reverse=True)
+        family_parts = [f"{bucket_name}:{proto_id}:{score:.2f}" for score, proto_id, bucket_name in family_rows[:4]]
+
+        return {
+            "bucket": bucket,
+            "cut": float(self.CUT_BUCKET_VALUES[bucket]),
+            "family": "cut[" + ", ".join(family_parts) + "]",
+            "nearest_id": nearest_id,
+            "nearest_distance": float(nearest_distance),
+            "score": float(best_score),
         }
 
     def _apply_guards(self, feature_vec: np.ndarray, params: dict) -> dict:
@@ -1194,29 +1362,44 @@ class PolearmReferenceReframer(SwordReferenceReframer):
         # Very broad / full-bodied polearms are usually already readable and
         # should not be aggressively shortened.
         if width_like >= 50.0 and bot35_ratio >= 0.21 and compactness <= 0.82:
-            params["cut"] = min(float(params["cut"]), 0.02)
-            params["family"] += ", full_broad_guard"
+            params["cut_bucket"] = "zero"
+            params["cut"] = 0.0
+            params["family"] += ", full_broad_zero_guard"
 
         # Extremely broad upper-heavy heads also tend to be shown more fully.
         if width_like >= 55.0 and top45_ratio >= 0.60 and bot35_ratio <= 0.13:
-            params["cut"] = min(float(params["cut"]), 0.05)
+            params["cut_bucket"] = "zero"
+            params["cut"] = 0.0
             params["length"] = min(float(params["length"]), 294.0)
             params["top_x"] = min(float(params["top_x"]), 216.0)
-            params["family"] += ", top_heavy_full_guard"
+            params["family"] += ", top_heavy_zero_guard"
 
         params["cut"] = float(np.clip(float(params["cut"]), self.MIN_CUT_RATIO, self.MAX_CUT_RATIO))
         return params
 
     def _inferred_params(self, object_bgra: np.ndarray) -> dict:
         feature_vec = self._feature_vec(object_bgra)
-        params = self._blend_from_prototypes(feature_vec)
+        window_params = self._blend_window_from_prototypes(feature_vec)
+        cut_params = self._select_cut_bucket(feature_vec)
+        params = {
+            "family": window_params["family"] + ", " + cut_params["family"],
+            "cut_bucket": cut_params["bucket"],
+            "cut": float(cut_params["cut"]),
+            "length": float(window_params["length"]),
+            "top_x": float(window_params["top_x"]),
+            "window_nearest_id": window_params["nearest_id"],
+            "window_nearest_distance": window_params["nearest_distance"],
+            "cut_nearest_id": cut_params["nearest_id"],
+            "cut_nearest_distance": cut_params["nearest_distance"],
+            "max_weight": float(window_params["max_weight"]),
+        }
         params = self._apply_guards(feature_vec, params)
         return params
 
     def select_ref_cut_ratio(self, object_bgra: np.ndarray) -> float:
         return float(self._inferred_params(object_bgra)["cut"])
 
-    def reframe(self, object_bgra: np.ndarray, extra_scale: float = 1.0) -> np.ndarray:
+    def reframe(self, object_bgra: np.ndarray, extra_scale: float = 1.0, params: dict | None = None) -> np.ndarray:
         if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
             raise ValueError("Expected BGRA image")
 
@@ -1232,7 +1415,8 @@ class PolearmReferenceReframer(SwordReferenceReframer):
         if current_length <= 1e-6:
             raise ValueError("Degenerate polearm length")
 
-        params = self._inferred_params(object_bgra)
+        if params is None:
+            params = self._inferred_params(object_bgra)
         target_length = float(params["length"])
         target_top_x = float(params["top_x"])
         target_bottom_y = self.TARGET_BOTTOM_Y
@@ -1241,10 +1425,14 @@ class PolearmReferenceReframer(SwordReferenceReframer):
         ys, _ = np.where(binary > 0)
         if len(ys) == 0:
             raise ValueError("Binary mask is empty after contour extraction")
+        current_min_y = float(ys.min())
         current_max_y = float(ys.max())
 
         scale = target_length / current_length
         scale *= float(extra_scale)
+        visible_height = max(current_max_y - current_min_y, 1e-6)
+        max_scale_for_top = (target_bottom_y - self.TARGET_TOP_MARGIN_Y) / visible_height
+        scale = min(scale, float(max_scale_for_top))
         scale = float(np.clip(scale, self.MIN_SCALE, self.MAX_SCALE))
 
         tx = float(target_top_x - scale * current_top_x)
@@ -1373,7 +1561,11 @@ def run_claymore_reframe_debug():
             reframed_ref, params = reframer.reframe_window_autonomous(ref_bgra)
             print(
                 f"[MODEL] {path.name} -> {params['family']} "
-                f"center={params['center']:.3f} span={params['span']:.3f}"
+                + (
+                    ""
+                    if params.get("mode") == "identity"
+                    else f"center={params['center']:.3f} span={params['span']:.3f}"
+                )
             )
         except Exception as exc:
             print(f"[WARN] skip ref {path.name}: {exc}")
@@ -1401,7 +1593,7 @@ def run_polearm_reframe_debug():
     print(f"[INFO] refs:  {len(ref_files)}")
     print(f"[OUT]  {POLEARM_OUT_DIR}")
     print(f"[SRC]  polearm refs from {ALL_REF_DIR}")
-    print("[CFG]  REF_MODE=POLEARM_SWORD_LIKE")
+    print("[CFG]  REF_MODE=POLEARM_BUCKETED_AUTONOMOUS")
     print(f"[CFG]  REF_EXTRA_SCALE={REF_EXTRA_SCALE:.3f}")
 
     for path in crop_files:
@@ -1428,10 +1620,15 @@ def run_polearm_reframe_debug():
 
         try:
             ref_bgra = load_bgra_from_path(path)
-            ref_cut_ratio = reframer.select_ref_cut_ratio(ref_bgra)
-            print(f"[CUT]  {path.name} -> {ref_cut_ratio:.3f}")
+            params = reframer._inferred_params(ref_bgra)
+            ref_cut_ratio = float(params["cut"])
+            print(
+                f"[MODEL] {path.name} -> {params['family']} "
+                f"bucket={params['cut_bucket']} cut={ref_cut_ratio:.3f} "
+                f"len={params['length']:.1f} top_x={params['top_x']:.1f}"
+            )
             ref_cut = cut_ref_bottom_percent(ref_bgra, ref_cut_ratio)
-            reframed_ref = reframer.reframe(ref_cut, extra_scale=REF_EXTRA_SCALE)
+            reframed_ref = reframer.reframe(ref_cut, extra_scale=REF_EXTRA_SCALE, params=params)
         except Exception as exc:
             print(f"[WARN] skip ref {path.name}: {exc}")
             continue
