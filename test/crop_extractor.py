@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 TEST_DIR = Path(__file__).resolve().parent
 CROP_POLEARMS_DIR = TEST_DIR / "crop_polearms"
 CROPS_MANY_DIR = TEST_DIR / "crops_many"
-DEBUG_ROOT = TEST_DIR / "debug_step2self_5"
+DEBUG_ROOT = TEST_DIR / "debug_step2self_5_2"
 POLEARMS_OUT_DIR = DEBUG_ROOT / "polearms"
 CROP_POLEARMS_OUT_DIR = DEBUG_ROOT / "crop_polearms"
 CROPS_MANY_OUT_DIR = DEBUG_ROOT / "crops_many"
@@ -252,6 +252,8 @@ def _local_background_model(
         bg[take] = mean[take]
         rough[take] = np.sqrt(np.mean(var, axis=2))[take]
         remaining[take] = False
+        if not np.any(remaining):
+            break
 
     if np.any(remaining):
         samples = img_f32[sample_weight > 0]
@@ -346,14 +348,11 @@ def fill_internal_holes(mask: np.ndarray) -> np.ndarray:
     h, w = mask.shape
 
     for label in range(1, n):
-        ys, xs = np.where(labels == label)
-        if xs.size == 0:
-            continue
-
-        touches_border = (
-            xs.min() == 0 or xs.max() == w - 1 or
-            ys.min() == 0 or ys.max() == h - 1
-        )
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        ww = int(stats[label, cv2.CC_STAT_WIDTH])
+        hh = int(stats[label, cv2.CC_STAT_HEIGHT])
+        touches_border = (x == 0 or y == 0 or x + ww == w or y + hh == h)
         if not touches_border:
             holes[labels == label] = 255
 
@@ -455,8 +454,9 @@ def _occupancy_values_from_side(mask: np.ndarray, side: str) -> list[float]:
     return occ
 
 
-def _occupancy_run_from_side(mask: np.ndarray, side: str) -> int:
-    occ = _occupancy_values_from_side(mask, side)
+def _occupancy_run_from_side(mask: np.ndarray, side: str, occ: list[float] | None = None) -> int:
+    if occ is None:
+        occ = _occupancy_values_from_side(mask, side)
     limit = len(occ)
     p = 0
     while p < limit and occ[p] < MIN_BORDER_OCCUPANCY:
@@ -473,11 +473,17 @@ def _occupancy_run_from_side(mask: np.ndarray, side: str) -> int:
     return start + run
 
 
-def _extend_occupancy_run_from_side(mask: np.ndarray, side: str, run: int) -> int:
+def _extend_occupancy_run_from_side(
+    mask: np.ndarray,
+    side: str,
+    run: int,
+    occ: list[float] | None = None,
+) -> int:
     if run <= 0:
         return 0
 
-    occ = _occupancy_values_from_side(mask, side)
+    if occ is None:
+        occ = _occupancy_values_from_side(mask, side)
     limit = len(occ)
     p = int(run)
     last_keep = p - 1
@@ -514,15 +520,20 @@ def detect_border_stripes(mask: np.ndarray) -> dict:
     right_runs = [_run_white_from_side(mask, y, "right") for y in y_samples]
     top_runs = [_run_white_from_side(mask, x, "top") for x in x_samples]
     bottom_runs = [_run_white_from_side(mask, x, "bottom") for x in x_samples]
-    left_occ = _occupancy_run_from_side(mask, "left")
-    right_occ = _occupancy_run_from_side(mask, "right")
-    top_occ = _occupancy_run_from_side(mask, "top")
-    bottom_occ = _occupancy_run_from_side(mask, "bottom")
+    left_occ_values = _occupancy_values_from_side(mask, "left")
+    right_occ_values = _occupancy_values_from_side(mask, "right")
+    top_occ_values = _occupancy_values_from_side(mask, "top")
+    bottom_occ_values = _occupancy_values_from_side(mask, "bottom")
 
-    left = max(_robust_border_width(left_runs), _extend_occupancy_run_from_side(mask, "left", left_occ))
-    right = max(_robust_border_width(right_runs), _extend_occupancy_run_from_side(mask, "right", right_occ))
-    top = max(_robust_border_width(top_runs), _extend_occupancy_run_from_side(mask, "top", top_occ))
-    bottom = max(_robust_border_width(bottom_runs), _extend_occupancy_run_from_side(mask, "bottom", bottom_occ))
+    left_occ = _occupancy_run_from_side(mask, "left", left_occ_values)
+    right_occ = _occupancy_run_from_side(mask, "right", right_occ_values)
+    top_occ = _occupancy_run_from_side(mask, "top", top_occ_values)
+    bottom_occ = _occupancy_run_from_side(mask, "bottom", bottom_occ_values)
+
+    left = max(_robust_border_width(left_runs), _extend_occupancy_run_from_side(mask, "left", left_occ, left_occ_values))
+    right = max(_robust_border_width(right_runs), _extend_occupancy_run_from_side(mask, "right", right_occ, right_occ_values))
+    top = max(_robust_border_width(top_runs), _extend_occupancy_run_from_side(mask, "top", top_occ, top_occ_values))
+    bottom = max(_robust_border_width(bottom_runs), _extend_occupancy_run_from_side(mask, "bottom", bottom_occ, bottom_occ_values))
 
     return {
         "left": left,
@@ -606,18 +617,6 @@ def restore_bridges_from_cut_lines(
     max_gap: int = 80,
     bridge_thickness: int = 2,
 ) -> np.ndarray:
-    """
-    Восстанавливает короткие мостики сразу для всех 4 сторон,
-    но только рядом с реальными линиями среза рамки.
-
-    Логика для каждой стороны:
-    - берем cut_* из info["applied"]
-    - если по стороне ничего не срезали -> пропуск
-    - смотрим только 2-3 линии сразу после среза
-    - ищем 2 белых ранна с gap между ними
-    - если gap подходит по размеру, дорисовываем короткий мостик
-    """
-
     out = normalize_mask(seed)
     h, w = out.shape
     applied = info.get("applied", {})
@@ -873,6 +872,5 @@ def run_debug2():
     print("[DONE]")
 if __name__ == "__main__":
     run_debug2()
-
 
 
