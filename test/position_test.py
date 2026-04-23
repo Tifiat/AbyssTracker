@@ -35,11 +35,11 @@ REF_EXTRA_SCALE = 1.05
 ALPHA_MASK_THRESHOLD = 32
 
 
-def ensure_dir(path: Path):
+def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def reset_dir(path: Path):
+def reset_dir(path: Path) -> None:
     target = path.resolve()
     test_root = TEST_DIR.resolve()
     if target != test_root and test_root not in target.parents:
@@ -49,7 +49,7 @@ def reset_dir(path: Path):
     target.mkdir(parents=True, exist_ok=True)
 
 
-def save_img(path: Path, img: np.ndarray):
+def save_img(path: Path, img: np.ndarray) -> None:
     ensure_dir(path.parent)
     cv2.imwrite(str(path), img)
 
@@ -157,13 +157,6 @@ def load_compensated_crop(
     }
 
 
-def load_compensated_claymore_crop(
-    path: Path,
-    target_size: int = 256,
-) -> tuple[np.ndarray, np.ndarray, dict]:
-    return load_compensated_crop(path, target_size=target_size)
-
-
 def alpha_to_binary(image_bgra: np.ndarray) -> np.ndarray:
     if image_bgra.ndim != 3 or image_bgra.shape[2] != 4:
         raise ValueError("Expected BGRA image")
@@ -264,6 +257,35 @@ def cut_ref_bottom_percent(object_bgra: np.ndarray, cut_ratio: float) -> np.ndar
     out_alpha = out[:, :, 3]
     out[out_alpha == 0, :3] = 0
     return out
+
+
+def log_crop_compensation(path: Path, meta: dict) -> None:
+    comp = meta["compensation"]
+    cuts = meta["applied_cuts"]
+    print(
+        f"[CROPWIN] {path.name} -> "
+        f"L{cuts.get('cut_left', 0)} R{cuts.get('cut_right', 0)} "
+        f"T{cuts.get('cut_top', 0)} B{cuts.get('cut_bottom', 0)} "
+        f"scale={comp['scale']:.3f}"
+    )
+
+
+def save_compensated_debug_crops(
+    crop_files: list[Path],
+    out_dir: Path,
+    loader,
+) -> None:
+    for path in crop_files:
+        print(f"[CROP] {path.name}")
+
+        try:
+            _, reframed, meta = loader(path)
+            log_crop_compensation(path, meta)
+        except Exception as exc:
+            print(f"[WARN] skip crop {path.name}: {exc}")
+            continue
+
+        save_img(out_dir / path.name, reframed)
 
 
 class SwordReferenceReframer:
@@ -386,9 +408,7 @@ class SwordReferenceReframer:
         if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
             raise ValueError("Expected BGRA image")
 
-        alpha = object_bgra[:, :, 3]
-        binary = np.where(alpha > ALPHA_MASK_THRESHOLD, 255, 0).astype(np.uint8)
-
+        binary = alpha_to_binary(object_bgra)
         contour = self._largest_contour(binary)
         if contour is None or len(contour) < 2:
             raise ValueError("Failed to build contour for reference")
@@ -425,9 +445,7 @@ class SwordReferenceReframer:
         if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
             raise ValueError("Expected BGRA image")
 
-        alpha = object_bgra[:, :, 3]
-        binary = np.where(alpha > ALPHA_MASK_THRESHOLD, 255, 0).astype(np.uint8)
-
+        binary = alpha_to_binary(object_bgra)
         contour = self._largest_contour(binary)
         if contour is None or len(contour) < 2:
             raise ValueError("Failed to build contour for extracted object")
@@ -458,19 +476,7 @@ class SwordReferenceReframer:
             ],
             dtype=np.float32,
         )
-
-        out = cv2.warpAffine(
-            object_bgra,
-            matrix,
-            (self.TARGET_CANVAS_SIZE, self.TARGET_CANVAS_SIZE),
-            flags=cv2.INTER_CUBIC,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(0, 0, 0, 0),
-        )
-
-        out_alpha = out[:, :, 3]
-        out[out_alpha == 0, :3] = 0
-        return out
+        return warp_bgra_to_square(object_bgra, matrix, target_size=self.TARGET_CANVAS_SIZE)
 
     def _largest_contour(self, binary: np.ndarray):
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -714,33 +720,6 @@ class ClaymoreReferenceReframer:
             "midpoint": [124.5, 127.5],
         },
     }
-    VARIANT_BENCHMARK_TARGETS = {
-        "12101": {"center": 0.488, "span": 0.575, "length": 335.94, "midpoint": [132.5, 115.5]},
-        "12401": {"center": 0.513, "span": 0.925, "length": 316.24, "midpoint": [120.5, 135.5]},
-        "12402": {"center": 0.515, "span": 0.770, "length": 332.90, "midpoint": [121.0, 127.5]},
-        "12405": {"center": 0.500, "span": 0.980, "length": 341.40, "midpoint": [124.5, 127.5]},
-        "12406": {"center": 0.500, "span": 0.990, "length": 332.26, "midpoint": [119.5, 127.5]},
-        "12408": {"center": 0.500, "span": 0.990, "length": 332.26, "midpoint": [119.5, 127.5]},
-        "12409": {"center": 0.525, "span": 0.950, "length": 310.00, "midpoint": [127.5, 131.0]},
-        "12410": {"center": 0.500, "span": 0.970, "length": 340.74, "midpoint": [126.0, 127.5]},
-        "12412": {"center": 0.5125, "span": 0.975, "length": 253.31, "midpoint": [117.0, 166.0]},
-        "12414": {"center": 0.500, "span": 0.970, "length": 324.69, "midpoint": [130.5, 127.5]},
-        "12415": {"center": 0.5375, "span": 0.575, "length": 293.51, "midpoint": [132.5, 118.0]},
-        "12417": {"center": 0.425, "span": 0.800, "length": 340.07, "midpoint": [125.5, 127.5]},
-        "12418": {"center": 0.550, "span": 0.780, "length": 330.34, "midpoint": [127.0, 127.5]},
-        "12424": {"center": 0.525, "span": 0.940, "length": 337.44, "midpoint": [114.5, 127.5]},
-        "12430": {"center": 0.538, "span": 0.925, "length": 392.19, "midpoint": [124.5, 101.0]},
-        "12431": {"center": 0.488, "span": 0.725, "length": 282.97, "midpoint": [139.5, 119.0]},
-        "12432": {"center": 0.5125, "span": 0.975, "length": 314.41, "midpoint": [116.0, 137.0]},
-        "12433": {"center": 0.500, "span": 0.990, "length": 336.79, "midpoint": [115.0, 127.5]},
-        "12511": {"center": 0.565, "span": 0.850, "length": 330.98, "midpoint": [121.5, 127.5]},
-        "12513": {"center": 0.363, "span": 0.725, "length": 331.61, "midpoint": [136.0, 111.0]},
-        "12514": {"center": 0.500, "span": 0.990, "length": 329.71, "midpoint": [124.5, 127.5]},
-        "12301": {"center": 0.4875, "span": 0.975, "length": 329.61, "midpoint": [124.5, 125.0]},
-        "12302": {"center": 0.450, "span": 0.550, "length": 312.43, "midpoint": [126.0, 122.0]},
-        "12305": {"center": 0.5125, "span": 0.975, "length": 331.0, "midpoint": [118.5, 120.0]},
-        "12512": {"center": 0.500, "span": 1.000, "length": 298.29, "midpoint": [123.5, 133.5]},
-    }
     PROTOTYPE_FEATURE_SCALES = np.array(
         [0.05, 0.05, 0.05, 8.0, 0.09, 0.05, 0.05, 0.08, 0.05, 0.08, 0.25],
         dtype=np.float32,
@@ -790,7 +769,7 @@ class ClaymoreReferenceReframer:
                 "max_weight": float(params["max_weight"]),
             }
         # For unseen claymores, a small amount of extra visible span is safer
-        # than over-cropping. Known calibrated cases converge to max_weight≈1,
+        # than over-cropping. Known calibrated cases converge to max_weight~=1,
         # so this leaves them unchanged while slightly broadening ambiguous refs.
         uncertainty = max(0.0, 1.0 - float(params.get("max_weight", 1.0)))
         if uncertainty > 1e-3 and float(params["span"]) < 0.90:
@@ -926,9 +905,7 @@ class ClaymoreReferenceReframer:
         if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
             raise ValueError("Expected BGRA image")
 
-        alpha = object_bgra[:, :, 3]
-        binary = np.where(alpha > ALPHA_MASK_THRESHOLD, 255, 0).astype(np.uint8)
-
+        binary = alpha_to_binary(object_bgra)
         contour = self._largest_contour(binary)
         if contour is None or len(contour) < 2:
             raise ValueError("Failed to build contour for extracted object")
@@ -959,19 +936,7 @@ class ClaymoreReferenceReframer:
             ],
             dtype=np.float32,
         )
-
-        out = cv2.warpAffine(
-            object_bgra,
-            matrix,
-            (self.TARGET_CANVAS_SIZE, self.TARGET_CANVAS_SIZE),
-            flags=cv2.INTER_CUBIC,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(0, 0, 0, 0),
-        )
-
-        out_alpha = out[:, :, 3]
-        out[out_alpha == 0, :3] = 0
-        return out
+        return warp_bgra_to_square(object_bgra, matrix, target_size=self.TARGET_CANVAS_SIZE)
 
     def reframe_window(
         self,
@@ -985,9 +950,7 @@ class ClaymoreReferenceReframer:
         if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
             raise ValueError("Expected BGRA image")
 
-        alpha = object_bgra[:, :, 3]
-        binary = np.where(alpha > ALPHA_MASK_THRESHOLD, 255, 0).astype(np.uint8)
-
+        binary = alpha_to_binary(object_bgra)
         contour = self._largest_contour(binary)
         if contour is None or len(contour) < 2:
             raise ValueError("Failed to build contour for extracted object")
@@ -1018,19 +981,7 @@ class ClaymoreReferenceReframer:
             ],
             dtype=np.float32,
         )
-
-        out = cv2.warpAffine(
-            object_bgra,
-            matrix,
-            (self.TARGET_CANVAS_SIZE, self.TARGET_CANVAS_SIZE),
-            flags=cv2.INTER_CUBIC,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(0, 0, 0, 0),
-        )
-
-        out_alpha = out[:, :, 3]
-        out[out_alpha == 0, :3] = 0
-        return out
+        return warp_bgra_to_square(object_bgra, matrix, target_size=self.TARGET_CANVAS_SIZE)
 
     def _largest_contour(self, binary: np.ndarray):
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -1322,7 +1273,7 @@ class PolearmReferenceReframer(SwordReferenceReframer):
             key=lambda item: (item[1][0], float(self.CUT_BUCKET_VALUES[item[0]])),
         )
         bucket = str(winner[0])
-        nearest_distance, nearest_id, best_score = winner[1]
+        nearest_distance, nearest_id, _ = winner[1]
 
         # Some slender mid-crop polearms sit on the boundary between the
         # conservative zero bucket and the regular light bucket. When zero only
@@ -1342,7 +1293,6 @@ class PolearmReferenceReframer(SwordReferenceReframer):
                 bucket = "light"
                 nearest_distance = float(light_distance)
                 nearest_id = str(light_id)
-                best_score = float(light_row[2])
 
         family_rows.sort(key=lambda item: item[0], reverse=True)
         family_parts = [f"{bucket_name}:{proto_id}:{score:.2f}" for score, proto_id, bucket_name in family_rows[:4]]
@@ -1353,7 +1303,6 @@ class PolearmReferenceReframer(SwordReferenceReframer):
             "family": "cut[" + ", ".join(family_parts) + "]",
             "nearest_id": nearest_id,
             "nearest_distance": float(nearest_distance),
-            "score": float(best_score),
         }
 
     def _apply_guards(self, feature_vec: np.ndarray, params: dict) -> dict:
@@ -1403,9 +1352,7 @@ class PolearmReferenceReframer(SwordReferenceReframer):
         if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
             raise ValueError("Expected BGRA image")
 
-        alpha = object_bgra[:, :, 3]
-        binary = np.where(alpha > ALPHA_MASK_THRESHOLD, 255, 0).astype(np.uint8)
-
+        binary = alpha_to_binary(object_bgra)
         contour = self._largest_contour(binary)
         if contour is None or len(contour) < 2:
             raise ValueError("Failed to build contour for extracted object")
@@ -1445,19 +1392,7 @@ class PolearmReferenceReframer(SwordReferenceReframer):
             ],
             dtype=np.float32,
         )
-
-        out = cv2.warpAffine(
-            object_bgra,
-            matrix,
-            (self.TARGET_CANVAS_SIZE, self.TARGET_CANVAS_SIZE),
-            flags=cv2.INTER_CUBIC,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(0, 0, 0, 0),
-        )
-
-        out_alpha = out[:, :, 3]
-        out[out_alpha == 0, :3] = 0
-        return out
+        return warp_bgra_to_square(object_bgra, matrix, target_size=self.TARGET_CANVAS_SIZE)
 
 
 def run_sword_reframe_debug():
@@ -1478,24 +1413,7 @@ def run_sword_reframe_debug():
     print("[CFG]  REF_CUT_MODE=CALIBRATED_GEOMETRY_TREE")
     print(f"[CFG]  REF_EXTRA_SCALE={REF_EXTRA_SCALE:.3f}")
 
-    for path in crop_files:
-        print(f"[CROP] {path.name}")
-
-        try:
-            _, reframed, meta = load_compensated_crop(path)
-            comp = meta["compensation"]
-            cuts = meta["applied_cuts"]
-            print(
-                f"[CROPWIN] {path.name} -> "
-                f"L{cuts.get('cut_left', 0)} R{cuts.get('cut_right', 0)} "
-                f"T{cuts.get('cut_top', 0)} B{cuts.get('cut_bottom', 0)} "
-                f"scale={comp['scale']:.3f}"
-            )
-        except Exception as exc:
-            print(f"[WARN] skip crop {path.name}: {exc}")
-            continue
-
-        save_img(OUT_DIR / path.name, reframed)
+    save_compensated_debug_crops(crop_files, OUT_DIR, load_compensated_crop)
 
     for path in ref_files:
         print(f"[REF]  {path.name}")
@@ -1534,24 +1452,7 @@ def run_claymore_reframe_debug():
     print(f"[SRC]  claymore refs from {ALL_REF_DIR}")
     print("[CFG]  REF_MODE=CLAYMORE_WINDOW_AUTONOMOUS")
 
-    for path in crop_files:
-        print(f"[CROP] {path.name}")
-
-        try:
-            _, reframed, meta = load_compensated_claymore_crop(path)
-            comp = meta["compensation"]
-            cuts = meta["applied_cuts"]
-            print(
-                f"[CROPWIN] {path.name} -> "
-                f"L{cuts.get('cut_left', 0)} R{cuts.get('cut_right', 0)} "
-                f"T{cuts.get('cut_top', 0)} B{cuts.get('cut_bottom', 0)} "
-                f"scale={comp['scale']:.3f}"
-            )
-        except Exception as exc:
-            print(f"[WARN] skip crop {path.name}: {exc}")
-            continue
-
-        save_img(CLAYMORE_OUT_DIR / path.name, reframed)
+    save_compensated_debug_crops(crop_files, CLAYMORE_OUT_DIR, load_compensated_crop)
 
     for path in ref_files:
         print(f"[REF]  {path.name}")
@@ -1596,24 +1497,7 @@ def run_polearm_reframe_debug():
     print("[CFG]  REF_MODE=POLEARM_BUCKETED_AUTONOMOUS")
     print(f"[CFG]  REF_EXTRA_SCALE={REF_EXTRA_SCALE:.3f}")
 
-    for path in crop_files:
-        print(f"[CROP] {path.name}")
-
-        try:
-            _, reframed, meta = load_compensated_crop(path)
-            comp = meta["compensation"]
-            cuts = meta["applied_cuts"]
-            print(
-                f"[CROPWIN] {path.name} -> "
-                f"L{cuts.get('cut_left', 0)} R{cuts.get('cut_right', 0)} "
-                f"T{cuts.get('cut_top', 0)} B{cuts.get('cut_bottom', 0)} "
-                f"scale={comp['scale']:.3f}"
-            )
-        except Exception as exc:
-            print(f"[WARN] skip crop {path.name}: {exc}")
-            continue
-
-        save_img(POLEARM_OUT_DIR / path.name, reframed)
+    save_compensated_debug_crops(crop_files, POLEARM_OUT_DIR, load_compensated_crop)
 
     for path in ref_files:
         print(f"[REF]  {path.name}")
@@ -1639,4 +1523,6 @@ def run_polearm_reframe_debug():
 
 
 if __name__ == "__main__":
+    run_claymore_reframe_debug()
     run_polearm_reframe_debug()
+    run_sword_reframe_debug()
