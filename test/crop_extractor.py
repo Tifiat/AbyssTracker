@@ -11,9 +11,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 TEST_DIR = Path(__file__).resolve().parent
-CROP_DIR = TEST_DIR / "crop_polearms"
+CROP_POLEARMS_DIR = TEST_DIR / "crop_polearms"
+CROPS_MANY_DIR = TEST_DIR / "crops_many"
 DEBUG_ROOT = TEST_DIR / "debug_step2self_5"
-OUT_DIR = DEBUG_ROOT / "polearms"
+POLEARMS_OUT_DIR = DEBUG_ROOT / "polearms"
+CROP_POLEARMS_OUT_DIR = DEBUG_ROOT / "crop_polearms"
+CROPS_MANY_OUT_DIR = DEBUG_ROOT / "crops_many"
+POLEARMS_EXTRACTED_DIR = DEBUG_ROOT / "polearms_extracted"
 OBJECTS_ONLY_DIR = DEBUG_ROOT / "objects_only"
 SEARCH_DEPTH = 30
 MIN_STRIPE_RUN = 1
@@ -24,9 +28,16 @@ MAX_OCCUPANCY_LEAD_IN = 16
 MIN_BORDER_TAIL_OCCUPANCY = 0.30
 MAX_OCCUPANCY_EXTENSION = 4
 MAX_OCCUPANCY_GAP = 1
-FG_GATE_DILATE_ITERATIONS = 1
+BG_SAMPLE_EDGE_DILATE_ITERATIONS = 1
+BG_SAMPLE_MASK_DILATE_ITERATIONS = 1
+BG_LOCAL_KERNELS = (9, 17, 33, 65, 129)
+BG_LOCAL_MIN_COUNT = 20
+BG_LOCAL_MIN_FRACTION = 0.015
+BG_DIFF_BASE_THRESHOLD = 22.0
+BG_DIFF_ROUGHNESS_MUL = 1.2
+BG_DIFF_MAX_THRESHOLD = 48.0
 
-#СКЕЙЛИМ КРОП
+#SCALE CROP
 def resize_long_side_if_needed(img_bgr: np.ndarray):
     h, w = img_bgr.shape[:2]
     long_side = max(h, w)
@@ -41,7 +52,7 @@ def resize_long_side_if_needed(img_bgr: np.ndarray):
     else:
         return cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_CUBIC)
 
-#КАРТА КОНТУРОВ
+#EDGE MAP
 def _edge_map_scharr_max_channel_auto(img_bgr: np.ndarray) -> np.ndarray:
     img = img_bgr.astype(np.float32)
     img = cv2.GaussianBlur(img, (5, 5), 0)
@@ -55,7 +66,7 @@ def _edge_map_scharr_max_channel_auto(img_bgr: np.ndarray) -> np.ndarray:
     if nz.size == 0:
         return np.zeros(img_bgr.shape[:2], dtype=np.uint8)
 
-    thr = np.percentile(nz, 66)  # калибровать
+    thr = np.percentile(nz, 66)
     edge = (mag >= thr).astype(np.uint8) * 255
 
     kernel = np.ones((3, 3), np.uint8)
@@ -65,11 +76,11 @@ def _edge_map_scharr_max_channel_auto(img_bgr: np.ndarray) -> np.ndarray:
     edge = keep_components_by_area(edge, min_area=5)
     return edge
 
-#бинаризация маски
+#BINARY MASK
 def normalize_mask(mask: np.ndarray) -> np.ndarray:
-    return np.where(mask > 0, 255, 0).astype(np.uint8) #делает маску бинарной
+    return np.where(mask > 0, 255, 0).astype(np.uint8)
 
-#Оставляет объекты больше трешхолда
+#DELETE SMALL COMPONENTS
 def keep_components_by_area(mask: np.ndarray, min_area: int = 24) -> np.ndarray:
     n, labels, stats, _ = cv2.connectedComponentsWithStats(
         (mask > 0).astype(np.uint8),
@@ -161,9 +172,153 @@ def remove_confirmed_background_regions(
     out[remove > 0] = 0
     return normalize_mask(out)
 
-#СОЗДАНИЕ МАСКИ
+#CREATE MASK
+def _clean_foreground_mask(mask: np.ndarray, min_area: int = 150) -> np.ndarray:
+    out = keep_components_by_area(mask, min_area=min_area)
+    out = remove_small_border_components(out, max_area=800)
+    out = remove_weak_secondary_components(out, min_ratio_to_largest=0.16)
+    return normalize_mask(out)
+
+
+def _build_background_sample_mask(mask: np.ndarray, edge_hint: np.ndarray) -> np.ndarray:
+    mask = normalize_mask(mask)
+    edge_hint = normalize_mask(edge_hint)
+
+    edge_block = cv2.dilate(
+        edge_hint,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        iterations=BG_SAMPLE_EDGE_DILATE_ITERATIONS,
+    )
+    mask_block = cv2.dilate(
+        mask,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+        iterations=BG_SAMPLE_MASK_DILATE_ITERATIONS,
+    )
+
+    samples = np.logical_and(edge_block == 0, mask_block == 0).astype(np.uint8) * 255
+    samples[:2, :] = 0
+    samples[-2:, :] = 0
+    samples[:, :2] = 0
+    samples[:, -2:] = 0
+    return samples
+
+
+def _local_background_model(
+    img_bgr: np.ndarray,
+    sample_mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    h, w = sample_mask.shape
+    img_f32 = img_bgr.astype(np.float32)
+    sample_weight = (sample_mask > 0).astype(np.float32)
+
+    bg = np.zeros((h, w, 3), dtype=np.float32)
+    rough = np.zeros((h, w), dtype=np.float32)
+    remaining = np.ones((h, w), dtype=bool)
+
+    for kernel_size in BG_LOCAL_KERNELS:
+        count = cv2.boxFilter(
+            sample_weight,
+            cv2.CV_32F,
+            (kernel_size, kernel_size),
+            normalize=False,
+            borderType=cv2.BORDER_REFLECT,
+        )
+        min_count = max(
+            float(BG_LOCAL_MIN_COUNT),
+            float(kernel_size * kernel_size) * BG_LOCAL_MIN_FRACTION,
+        )
+        valid = count >= min_count
+        take = np.logical_and(remaining, valid)
+        if not np.any(take):
+            continue
+
+        color_sum = cv2.boxFilter(
+            img_f32 * sample_weight[..., None],
+            cv2.CV_32F,
+            (kernel_size, kernel_size),
+            normalize=False,
+            borderType=cv2.BORDER_REFLECT,
+        )
+        color_sq_sum = cv2.boxFilter(
+            (img_f32 ** 2) * sample_weight[..., None],
+            cv2.CV_32F,
+            (kernel_size, kernel_size),
+            normalize=False,
+            borderType=cv2.BORDER_REFLECT,
+        )
+        mean = color_sum / np.maximum(count[..., None], 1.0)
+        var = np.maximum(color_sq_sum / np.maximum(count[..., None], 1.0) - mean ** 2, 0.0)
+
+        bg[take] = mean[take]
+        rough[take] = np.sqrt(np.mean(var, axis=2))[take]
+        remaining[take] = False
+
+    if np.any(remaining):
+        samples = img_f32[sample_weight > 0]
+        fallback = samples.mean(axis=0) if samples.size else np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        bg[remaining] = fallback
+        rough[remaining] = 20.0
+
+    return bg, rough
+
+
+def build_foreground_gate_from_empty_regions(
+    img_bgr: np.ndarray,
+    mask: np.ndarray,
+    edge_hint: np.ndarray,
+    *,
+    return_debug: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict]:
+    sample_mask = _build_background_sample_mask(mask, edge_hint)
+    bg, rough = _local_background_model(img_bgr, sample_mask)
+
+    diff = np.linalg.norm(img_bgr.astype(np.float32) - bg, axis=2)
+    threshold = np.clip(
+        BG_DIFF_BASE_THRESHOLD + BG_DIFF_ROUGHNESS_MUL * rough,
+        BG_DIFF_BASE_THRESHOLD,
+        BG_DIFF_MAX_THRESHOLD,
+    )
+
+    bg_like = (diff <= threshold).astype(np.uint8) * 255
+    fg_gate = np.where(bg_like > 0, 0, 255).astype(np.uint8)
+
+    k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    fg_gate = cv2.morphologyEx(fg_gate, cv2.MORPH_OPEN, k3, iterations=1)
+    fg_gate = cv2.morphologyEx(fg_gate, cv2.MORPH_CLOSE, k3, iterations=1)
+    fg_gate = normalize_mask(fg_gate)
+
+    if not return_debug:
+        return fg_gate
+
+    return fg_gate, {
+        "sample_mask": sample_mask,
+        "bg_like": bg_like,
+        "diff": diff,
+        "threshold": threshold,
+        "sample_pixels": int(np.count_nonzero(sample_mask)),
+    }
+
+
+def _apply_foreground_gate_from_empty_regions(
+    img_bgr: np.ndarray,
+    mask: np.ndarray,
+    edge_hint: np.ndarray,
+    *,
+    min_area: int = 150,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    fg_gate, gate_debug = build_foreground_gate_from_empty_regions(
+        img_bgr,
+        mask,
+        edge_hint,
+        return_debug=True,
+    )
+
+    gated = remove_confirmed_background_regions(mask, fg_gate, min_bg_area=24)
+    gated = _clean_foreground_mask(gated, min_area=min_area)
+    return gated, fg_gate, gate_debug
+
+
 def edge_mask_base(precomputed_edges: np.ndarray) -> np.ndarray:
-    # Применяем морфологию (дилатация и закрытие)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = precomputed_edges.copy()
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
@@ -178,7 +333,7 @@ def edge_mask_base(precomputed_edges: np.ndarray) -> np.ndarray:
     mask = keep_components_by_area(mask, min_area=50)
     mask = normalize_mask(mask)
     return mask
-#Заполнение МАСКИ
+#FILL HOLES IN MASK
 def fill_internal_holes(mask: np.ndarray) -> np.ndarray:
     fg = (mask > 0).astype(np.uint8)
     bg = (fg == 0).astype(np.uint8)
@@ -205,8 +360,9 @@ def fill_internal_holes(mask: np.ndarray) -> np.ndarray:
     filled = cv2.bitwise_or(mask, holes)
     return normalize_mask(filled)
 
-"--------------------------------------ЧИСТКА РАМКИ--------------------------------------"
-#5 точек вдоль длины
+#CLEAR RAMKA
+
+#POINTS RO DETECT LINE
 def _sample_positions(length: int) -> list[int]:
     raw = [0.15, 0.30, 0.50, 0.70, 0.85]
     out = []
@@ -216,7 +372,7 @@ def _sample_positions(length: int) -> list[int]:
         out.append(p)
     return sorted(set(out))
 
-#ищет полосу по стороне, пропускает все черные, пока не найдет белое. глубина - ГЛОБАЛЬНАЯ КОНСТАНТА
+#FIND LINE BY SIDES
 def _run_white_from_side(mask: np.ndarray, idx: int, side: str) -> int:
     h, w = mask.shape
 
@@ -259,7 +415,7 @@ def _run_white_from_side(mask: np.ndarray, idx: int, side: str) -> int:
 
     return 0
 
-#оценка толщины рамки для поиска по всем сторонам
+#OCENKA TOLSHINI RAMKI - IDK FOW WHAT
 def _robust_border_width(
     runs: list[int],
     min_nonzero_samples: int = 3,
@@ -348,8 +504,8 @@ def _extend_occupancy_run_from_side(mask: np.ndarray, side: str, run: int) -> in
         break
 
     return last_keep + 1
-# ================ИСПОЛЬЗУЕТ 3 СВЕРХУ
-#запускает поиск по всем сторонам
+
+#STARTS SEARCH BY ALL SIDES
 def detect_border_stripes(mask: np.ndarray) -> dict:
     h, w = mask.shape
     y_samples = _sample_positions(h)
@@ -381,18 +537,11 @@ def detect_border_stripes(mask: np.ndarray) -> dict:
         "x_samples": x_samples,
     }
 
-#ВЫРЕЗАТЬ РАМКУ. можно указать стороны l r t b, либо отрежет все 4 (mask, "t", "b")
+#CUT RAMKA
 def cleanup_mask_by_detected_border_hard(
     mask: np.ndarray,
     *sides: str
 ) -> tuple[np.ndarray, dict]:
-    """
-    Удаляет рамку с выбранных сторон.
-
-    Возвращает:
-    - out: маска после среза
-    - info: словарь с детекцией и реально применёнными срезами (cut_*)
-    """
 
     if mask.max() > 1:
         mask = normalize_mask(mask)
@@ -438,7 +587,7 @@ def cleanup_mask_by_detected_border_hard(
 
     return out, info
 
-#ВЫРЕЗАНИЕ ПО МАСКЕ
+#CUT BY MASK
 def make_object_bgra(img_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
     h, w = mask.shape
     out = np.zeros((h, w, 4), dtype=np.uint8)
@@ -447,7 +596,7 @@ def make_object_bgra(img_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
     out[mask == 0, :3] = 0
     return out
 
-#Восстановление разрывов вызванных срезом рамки
+#RESTORE BRIDGE IF LINE CORRUPTED OBJECT
 def restore_bridges_from_cut_lines(
     seed: np.ndarray,
     info: dict,
@@ -564,242 +713,20 @@ def restore_bridges_from_cut_lines(
     return out
 
 
-#ХЭЛПЕРЫ ЕСЛИ НАЧНЕТ ЛОВИТЬСЯ УЗОР
-def _mean_patch_bgr(img_bgr: np.ndarray, cx: int, cy: int, radius: int) -> np.ndarray:
-    h, w = img_bgr.shape[:2]
-    x0 = max(0, cx - radius)
-    x1 = min(w, cx + radius + 1)
-    y0 = max(0, cy - radius)
-    y1 = min(h, cy + radius + 1)
-    patch = img_bgr[y0:y1, x0:x1].astype(np.float32)
-    return patch.mean(axis=(0, 1))
 
-def _patch_stats_bgr(img_bgr: np.ndarray, cx: int, cy: int, radius: int) -> tuple[np.ndarray, float]:
-    h, w = img_bgr.shape[:2]
-    x0 = max(0, cx - radius)
-    x1 = min(w, cx + radius + 1)
-    y0 = max(0, cy - radius)
-    y1 = min(h, cy + radius + 1)
-    patch = img_bgr[y0:y1, x0:x1].astype(np.float32)
-    mean = patch.mean(axis=(0, 1))
-    rough = float(np.sqrt(np.mean(np.var(patch.reshape(-1, 3), axis=0))))
-    return mean, rough
-
-
-def _build_bg_from_corner_samples(
-    h: int,
-    w: int,
-    samples: list[tuple[tuple[float, float], np.ndarray]],
-) -> np.ndarray:
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    bg_acc = np.zeros((h, w, 3), dtype=np.float32)
-    w_acc = np.zeros((h, w, 1), dtype=np.float32)
-
-    for (cx, cy), color in samples:
-        dist2 = (xx - cx) ** 2 + (yy - cy) ** 2
-        weight = 1.0 / np.maximum(dist2, 1.0)
-        bg_acc += weight[..., None] * color[None, None, :]
-        w_acc += weight[..., None]
-
-    return bg_acc / np.maximum(w_acc, 1e-6)
-
-
-def _rgb_distance_to_segment(image_f32: np.ndarray, c0: np.ndarray, c1: np.ndarray) -> np.ndarray:
-    v = (c1 - c0).astype(np.float32)
-    vv = float(np.dot(v, v))
-    if vv < 1e-6:
-        return np.linalg.norm(image_f32 - c0[None, None, :], axis=2)
-
-    p = image_f32 - c0[None, None, :]
-    t = np.clip(np.sum(p * v[None, None, :], axis=2) / vv, 0.0, 1.0)
-    proj = c0[None, None, :] + t[..., None] * v[None, None, :]
-    return np.linalg.norm(image_f32 - proj, axis=2)
-
-
-def build_foreground_gate_from_card_bg(
-    img_bgr: np.ndarray,
-    applied_cuts: dict | None = None,
-    *,
-    return_debug: bool = False,
-) -> np.ndarray | tuple[np.ndarray, dict]:
-    h, w = img_bgr.shape[:2]
-
-    cuts = applied_cuts or {}
-    cut_left = max(int(cuts.get("cut_left", 0)), 0)
-    cut_right = max(int(cuts.get("cut_right", 0)), 0)
-    cut_top = max(int(cuts.get("cut_top", 0)), 0)
-    cut_bottom = max(int(cuts.get("cut_bottom", 0)), 0)
-
-    inner_x0 = float(cut_left)
-    inner_x1 = float(max(cut_left, w - 1 - cut_right))
-    inner_y0 = float(cut_top)
-    inner_y1 = float(max(cut_top, h - 1 - cut_bottom))
-
-    inner_w = max(1.0, inner_x1 - inner_x0 + 1.0)
-    inner_h = max(1.0, inner_y1 - inner_y0 + 1.0)
-
-    inset = max(8, int(round(min(inner_h, inner_w) * 0.08)))
-    radius = max(2, int(round(min(h, w) * 0.02)))
-
-    left_x = int(round(inner_x0 + inset))
-    right_x = int(round(inner_x1 - inset))
-    top_y = int(round(inner_y0 + inset))
-    bottom_y = int(round(inner_y1 - inset))
-
-    # Build the background from inner corners after the preliminary border cut.
-    # This keeps the old successful behavior, but avoids sampling the raw outer frame.
-    sample_points = {
-        "tl": (left_x, top_y),
-        "tr": (right_x, top_y),
-        "bl": (left_x, bottom_y),
-        "br": (right_x, bottom_y),
-    }
-
-    stats = []
-    for name, (cx, cy) in sample_points.items():
-        cx = max(0, min(w - 1, cx))
-        cy = max(0, min(h - 1, cy))
-        mean, rough = _patch_stats_bgr(img_bgr, cx, cy, radius)
-        stats.append((name, (float(cx), float(cy)), mean, rough))
-
-    stats_by_name = {name: (point, mean, rough) for name, point, mean, rough in stats}
-
-    all_names = ["tl", "tr", "bl", "br"]
-    colors = np.stack([stats_by_name[name][1] for name in all_names], axis=0)
-    median_color = np.median(colors, axis=0)
-
-    scored = []
-    for name in all_names:
-        point, mean, rough = stats_by_name[name]
-        consistency = float(np.linalg.norm(mean - median_color))
-        score = consistency + 1.5 * rough
-        scored.append((score, name, point, mean, rough))
-
-    scored.sort(key=lambda item: item[0])
-    selected = scored[:3]
-
-    bg = _build_bg_from_corner_samples(
-        h,
-        w,
-        [(point, mean) for _, _, point, mean, _ in selected],
-    )
-
-    img_f32 = img_bgr.astype(np.float32)
-    diff = np.linalg.norm(img_f32 - bg, axis=2)
-
-    border = max(10, int(round(min(inner_h, inner_w) * 0.06)))
-    border_vals_parts = []
-    for _, _, point, _, _ in selected:
-        cx = int(round(point[0]))
-        cy = int(round(point[1]))
-        x0 = max(0, cx - border)
-        x1 = min(w, cx + border + 1)
-        y0 = max(0, cy - border)
-        y1 = min(h, cy + border + 1)
-        border_vals_parts.append(diff[y0:y1, x0:x1].ravel())
-    border_vals = np.concatenate(border_vals_parts)
-
-    border_med = float(np.median(border_vals))
-    border_mad = float(np.median(np.abs(border_vals - border_med)))
-    thr = float(np.clip(border_med + 3.0 * max(border_mad, 2.0), 18.0, 40.0))
-
-    gate = (diff >= thr).astype(np.uint8) * 255
-
-    k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    gate = cv2.morphologyEx(gate, cv2.MORPH_OPEN, k3, iterations=1)
-    gate = cv2.morphologyEx(gate, cv2.MORPH_CLOSE, k5, iterations=1)
-
-    gate = normalize_mask(gate)
-
-    if not return_debug:
-        return gate
-
-    top_means = [mean for _, name, _, mean, _ in selected if name in ("tl", "tr")]
-    bottom_means = [mean for _, name, _, mean, _ in selected if name in ("bl", "br")]
-    all_means = [mean for _, _, _, mean, _ in selected]
-    top_mean = np.mean(top_means if top_means else all_means, axis=0).astype(np.float32)
-    bottom_mean = np.mean(bottom_means if bottom_means else all_means, axis=0).astype(np.float32)
-
-    return gate, {
-        "diff": diff,
-        "thr": float(thr),
-        "top_mean": top_mean,
-        "bottom_mean": bottom_mean,
-    }
-
-
-def _apply_foreground_gate_from_card_bg(
-    img_bgr: np.ndarray,
-    mask: np.ndarray,
-    applied_cuts: dict | None = None,
-    *,
-    dilate_iterations: int = 1,
-    min_area: int = 150,
-) -> tuple[np.ndarray, np.ndarray]:
-    fg_gate, gate_debug = build_foreground_gate_from_card_bg(
-        img_bgr,
-        applied_cuts,
-        return_debug=True,
-    )
-    fg_gate = cv2.dilate(
-        fg_gate,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
-        iterations=dilate_iterations,
-    )
-    gated = remove_confirmed_background_regions(mask, fg_gate, min_bg_area=24)
-    gated = keep_components_by_area(gated, min_area=min_area)
-    gated = remove_small_border_components(gated, max_area=800)
-
-    gated = remove_weak_secondary_components(gated, min_ratio_to_largest=0.16)
-
-    diff = gate_debug["diff"]
-    thr = float(gate_debug["thr"])
-    seg = _rgb_distance_to_segment(
-        img_bgr.astype(np.float32),
-        gate_debug["top_mean"],
-        gate_debug["bottom_mean"],
-    )
-    weak_bg = np.logical_and.reduce([
-        gated > 0,
-        seg < 4.0,
-        diff < thr + 10.0,
-    ])
-    if np.count_nonzero(weak_bg) >= 500:
-        gated[weak_bg] = 0
-        gated = keep_components_by_area(gated, min_area=min_area)
-        gated = remove_small_border_components(gated, max_area=800)
-        gated = remove_weak_secondary_components(gated, min_ratio_to_largest=0.16)
-
-    return gated, fg_gate
-
-
-
-#ОБЕРТКИ ДЛЯ ВЫЗОВА
+#OBERTKI FOR VIZOV
 def extract_object_with_info_from_crop(crop_bgr: np.ndarray) -> tuple[np.ndarray, dict]:
     crop_scaled = resize_long_side_if_needed(crop_bgr)
     em_scharr = _edge_map_scharr_max_channel_auto(crop_scaled)
     mask_base = edge_mask_base(em_scharr)
 
-    # Сначала грубо оцениваем срезы рамки, потом строим fg_gate уже
-    # внутри очищенного окна карточки.
-    _, pre_info = cleanup_mask_by_detected_border_hard(mask_base)
-    mask_base, _ = _apply_foreground_gate_from_card_bg(
-        crop_scaled,
-        mask_base,
-        pre_info.get("applied"),
-        dilate_iterations=FG_GATE_DILATE_ITERATIONS,
-        min_area=150,
-    )
-
     seed, info = cleanup_mask_by_detected_border_hard(mask_base)
     seed_fixed = restore_bridges_from_cut_lines(seed, info)
     filled_fixed = fill_internal_holes(seed_fixed)
-    filled_fixed, _ = _apply_foreground_gate_from_card_bg(
+    filled_fixed, _, bg_info = _apply_foreground_gate_from_empty_regions(
         crop_scaled,
         filled_fixed,
-        info.get("applied"),
-        dilate_iterations=FG_GATE_DILATE_ITERATIONS,
+        em_scharr,
         min_area=150,
     )
     obj = make_object_bgra(crop_scaled, filled_fixed)
@@ -807,6 +734,9 @@ def extract_object_with_info_from_crop(crop_bgr: np.ndarray) -> tuple[np.ndarray
         "scaled_shape": crop_scaled.shape[:2],
         "applied_cuts": dict(info.get("applied", {})),
         "cleanup_info": info,
+        "background_info": {
+            "sample_pixels": int(bg_info.get("sample_pixels", 0)),
+        },
     }
 
 
@@ -829,7 +759,7 @@ def extract_object_with_info_from_path(path: Path) -> tuple[np.ndarray, dict]:
     return extract_object_with_info_from_crop(crop_bgr)
 
 
-#читалка для дебага
+#DEBUG READERS
 def ensure_dir(path: Path):
     path.mkdir(parents=True, exist_ok=True)
 def save_img(path: Path, img: np.ndarray):
@@ -842,15 +772,30 @@ def save_bg_candidate(path: Path, mask: np.ndarray, fg_gate: np.ndarray):
     save_img(path, bg_candidate)
 
 
-def run_debug2():
-    ensure_dir(OUT_DIR)
+def save_float_heatmap(path: Path, values: np.ndarray, scale: float = 5.0):
+    vis = np.clip(values.astype(np.float32) * scale, 0, 255).astype(np.uint8)
+    vis = cv2.applyColorMap(vis, cv2.COLORMAP_TURBO)
+    save_img(path, vis)
 
-    files = sorted(CROP_DIR.glob("*.png"))
+
+def _run_debug_dir(
+    crop_dir: Path,
+    out_dirs: tuple[Path, ...],
+    object_prefix: str,
+    extracted_dir: Path | None = None,
+):
+    for out_dir in out_dirs:
+        ensure_dir(out_dir)
+    ensure_dir(OBJECTS_ONLY_DIR)
+    if extracted_dir is not None:
+        ensure_dir(extracted_dir)
+
+    files = sorted(crop_dir.glob("*.png"))
     if not files:
-        raise FileNotFoundError(f"Нет png в {CROP_DIR}")
+        raise FileNotFoundError(f"No png files in {crop_dir}")
 
-    print(f"[INFO] crops: {len(files)}")
-    print(f"[OUT]  {OUT_DIR}")
+    print(f"[INFO] {crop_dir.name}: {len(files)}")
+    print("[OUT]  " + ", ".join(str(out_dir) for out_dir in out_dirs))
 
     for path in files:
         print(f"[CROP] {path.name}")
@@ -860,57 +805,71 @@ def run_debug2():
             print(f"[WARN] skip unreadable: {path}")
             continue
 
-        crop_out_dir = OUT_DIR / path.stem
-        ensure_dir(crop_out_dir)
+        crop_out_dirs = tuple(out_dir / path.stem for out_dir in out_dirs)
+        for crop_out_dir in crop_out_dirs:
+            ensure_dir(crop_out_dir)
 
-        save_img(crop_out_dir / "original.png", crop_src)
+        def save_step(name: str, img: np.ndarray):
+            for crop_out_dir in crop_out_dirs:
+                save_img(crop_out_dir / name, img)
+
+        save_step("original.png", crop_src)
 
         crop_scaled = resize_long_side_if_needed(crop_src)
-        save_img(crop_out_dir / "scaled_input.png", crop_scaled)
+        save_step("scaled_input.png", crop_scaled)
 
-        # карта  — adaptive color scharr
+        # Adaptive color Scharr edge map.
         em_scharr2 = _edge_map_scharr_max_channel_auto(crop_scaled)
-        save_img(crop_out_dir / "em_scharr2.png", em_scharr2)
-
+        save_step("em_scharr2.png", em_scharr2)
 
         # ---------- PIPELINE ----------
         mask_base2 = edge_mask_base(em_scharr2)
-        save_img(crop_out_dir / "mask_base2.png", mask_base2)
-        # Анти-узор после грубой оценки срезов рамки.
-        _, pre_info2 = cleanup_mask_by_detected_border_hard(mask_base2)
-        mask_base2, fg_gate_pre2 = _apply_foreground_gate_from_card_bg(
-            crop_scaled,
-            mask_base2,
-            pre_info2.get("applied"),
-            dilate_iterations=FG_GATE_DILATE_ITERATIONS,
-            min_area=150,
-        )
-        save_img(crop_out_dir / "fg_gate_pre2.png", fg_gate_pre2)
+        save_step("mask_base2.png", mask_base2)
 
         seed2, info2 = cleanup_mask_by_detected_border_hard(mask_base2)
-        save_img(crop_out_dir / "seed_after_cut_all2.png", seed2)
+        save_step("seed_after_cut_all2.png", seed2)
 
         seed_fixed2 = restore_bridges_from_cut_lines(seed2, info2)
-        save_img(crop_out_dir / "seed_fixed2.png", seed_fixed2)
+        save_step("seed_fixed2.png", seed_fixed2)
 
         filled_fixed2 = fill_internal_holes(seed_fixed2)
         filled_before_gate2 = filled_fixed2.copy()
-        filled_fixed2, fg_gate_final2 = _apply_foreground_gate_from_card_bg(
+        save_step("filled_before_bg_gate2.png", filled_before_gate2)
+
+        filled_fixed2, fg_gate_final2, bg_debug2 = _apply_foreground_gate_from_empty_regions(
             crop_scaled,
             filled_fixed2,
-            info2.get("applied"),
-            dilate_iterations=FG_GATE_DILATE_ITERATIONS,
+            em_scharr2,
             min_area=150,
         )
-        save_img(crop_out_dir / "fg_gate_final2.png", fg_gate_final2)
-        save_bg_candidate(crop_out_dir / "bg_candidate_final2.png", filled_before_gate2, fg_gate_final2)
-        save_img(crop_out_dir / "filled__fixed.png", filled_fixed2)
+        save_step("bg_sample_mask2.png", bg_debug2["sample_mask"])
+        save_step("bg_like2.png", bg_debug2["bg_like"])
+        for crop_out_dir in crop_out_dirs:
+            save_float_heatmap(crop_out_dir / "bg_diff2.png", bg_debug2["diff"])
+        save_step("fg_gate_final2.png", fg_gate_final2)
+        for crop_out_dir in crop_out_dirs:
+            save_bg_candidate(crop_out_dir / "bg_candidate_final2.png", filled_before_gate2, fg_gate_final2)
+        save_step("filled__fixed.png", filled_fixed2)
 
         obj2 = make_object_bgra(crop_scaled, filled_fixed2)
-        save_img(crop_out_dir / "object2.png", obj2)
-        save_img(OBJECTS_ONLY_DIR / f"{CROP_DIR.name}__{path.name}", obj2)
+        save_step("object2.png", obj2)
+        save_img(OBJECTS_ONLY_DIR / f"{object_prefix}__{path.name}", obj2)
+        if extracted_dir is not None:
+            save_img(extracted_dir / path.name, obj2)
 
 
+def run_debug2():
+    _run_debug_dir(
+        CROP_POLEARMS_DIR,
+        (POLEARMS_OUT_DIR, CROP_POLEARMS_OUT_DIR),
+        "polearms",
+        POLEARMS_EXTRACTED_DIR,
+    )
+    _run_debug_dir(
+        CROPS_MANY_DIR,
+        (CROPS_MANY_OUT_DIR,),
+        "crops_many",
+    )
     print("[DONE]")
 if __name__ == "__main__":
     run_debug2()
