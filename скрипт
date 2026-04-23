@@ -1,282 +1,311 @@
-AbyssTracker — актуальный контекст проекта
-Общая цель
+PROJECT: AbyssTracker
 
-Python + PySide6 desktop app:
+TYPE:
+Python desktop app (PySide6)
 
-загружает скриншот HoYoLAB
-режет иконки персонажей и оружия
-распознаёт их
-показывает команды и таймеры бездны
-Архитектура
-Основные файлы
-parser/hoyolab_parser.py — режет скриншот на кропы и возвращает pairs
-services/icon_enricher_orb.py — ORB для персонажей, плюс загрузка Enka refs
-services/weapon_phash_matcher.py — старый мёртвый pHash pipeline
-services/weapon_matcher.py — новый backend оружия
-services/data_updater.py — качает data/*.json
-ui/main_window.py — главный pipeline + UI
-Генерируемые папки
-assets/characters
-assets/weapons
-assets/hd/characters
-assets/hd/weapons
-cache/enka_ref_characters
-cache/enka_ref_weapons
-cache/ref_index
-debug/orb
-debug/weapons
-Что уже точно работает
-Parser
+PURPOSE:
+- Parse HoYoLAB screenshots
+- Detect characters and weapons
+- Build Abyss teams
+- Display timers
 
-HoyolabParser.parse() возвращает:
+REPOS:
+1) Main app (AbyssTracker)
+2) Data repo (AbyssTracker-data)
 
+--------------------------------------------------
+DATA REPO (AbyssTracker-data)
+
+FILES:
+- manifest.json
+- characters.json
+- weapons.json
+- hash_index_characters.json
+- hash_index_weapons.json
+
+characters.json:
+{
+  "<id>": {
+    "name": "...",
+    "rarity": 5,
+    "element": "Pyro",
+    "weapon_type": "Claymore",
+    "icon_name": "UI_AvatarIcon_..."
+  }
+}
+
+weapons.json:
+{
+  "<id>": {
+    "name": "...",
+    "rarity": 5,
+    "type": "Sword"
+  }
+}
+
+CONSTRAINTS:
+- no duplicates by icon_name
+- no test/dev characters
+- only real playable entities
+
+UPDATE:
+- GitHub Actions builds JSON + indices
+- manifest.json used as version signature
+
+--------------------------------------------------
+MAIN APP STRUCTURE
+
+DIRS:
+- parser/
+- services/
+- ui/
+- assets/
+- cache/
+- data/
+- debug/
+
+--------------------------------------------------
+PARSER
+
+parser/hoyolab_parser.py
+
+INPUT:
+- full screenshot
+
+OUTPUT:
 {
   "characters": [...],
   "weapons": [...],
   "pairs": [
-    {"char_index": int, "weapon_index": int}
+    {
+      "char_index": int,
+      "weapon_index": int
+    }
   ]
 }
 
-Важно:
+SIDE EFFECT:
+- saves crops:
+  assets/characters/char_###.png
+  assets/weapons/weapon_###.png
 
-pairing уже корректный
-char_index -> char_###.png
-weapon_index -> weapon_###.png
-Characters
-
-enrich_characters_orb(...) работает.
-
-Он:
-
-матчится по ORB
-качает Enka refs персонажей при необходимости
-кладёт refs в cache/enka_ref_characters/<id>.png
-кладёт HD иконки в assets/hd/characters/<id>.png
-пишет debug в debug/orb/report.json
-
-Из debug/orb/report.json в main_window.py строится:
-
-char_map = {
-  "char_000.png": "10000106"
-}
-Что признано мёртвым
-
-Старый weapon backend в services/weapon_phash_matcher.py:
-
-pHash
-Hamming
-MAX_DIST / MARGIN
-рендер ref на фон по rarity
-
-Это не работает как основной подход, потому что:
-
-Enka ref ≠ in-game crop
-это cross-domain matching
-
-pHash больше не развивать.
-
-Что уже сделано по weapon backend
-
-Создан новый файл:
-
-services/weapon_matcher.py
-
-ui/main_window.py уже переведён на:
-
-from services.weapon_matcher import match_weapons
-
-Весь старый pHash-блок из load_screenshot() удалён.
-
-Важный найденный факт про refs
-
-Downloader Enka refs уже был в проекте.
-
-Файл:
+--------------------------------------------------
+CHARACTER PIPELINE
 
 services/icon_enricher_orb.py
 
-Ключевое место:
+METHOD:
+- ORB matching vs Enka refs
 
-OrbIndex._load_ref_image_bgr()
+INPUT:
+- character crops
 
-Там:
+OUTPUT:
+- debug/orb/report.json
+- accepted/rejected debug dirs
 
-url = f"{ENKA_UI}/{icon_name}.png"
+RESULT:
+- char_map:
+  { "char_001.png": "<char_id>" }
 
-То есть refs персонажей и оружия реально качаются с Enka.
+STATUS:
+- stable, working well
 
-Что было добавлено
+--------------------------------------------------
+WEAPON PIPELINE (CURRENT)
 
-В services/icon_enricher_orb.py добавлена функция:
+services/weapon_matcher.py
 
-def warmup_weapon_cache(...):
-    ...
+PIPELINE:
 
-Она:
-
-читает data/weapons.json
-скачивает отсутствующие cache/enka_ref_weapons/<id>.png
-не матчится
-не трогает уже скачанные png
-
-Это уже отработало успешно:
-
-cache/enka_ref_weapons заполнен
-Что выяснилось по rarity
-
-detect_weapon_rarity_from_crop() уже переписан.
-
-Сейчас:
-
-в целом редкость определяется заметно лучше
-но иногда 1★ swords путаются с 2★
-
-Практический вывод:
-
-1★ / 2★ можно вообще скипать
-основной интерес: 3★ / 4★ / 5★
-Что уже проверено по baseline matcher
-
-Был временный baseline edge/mask/patch/color.
-
-Итог:
-
-с мягкими порогами давал ложные accept
-с жёсткими порогами дал 0 accepted
-
-Вывод:
-
-baseline как основной matcher слабый
-идти дальше надо через embedding retrieval
-Что сейчас внедряется
-
-Новый план для оружия:
-
-Не делать:
-on-the-fly DINO для каждого кандидата и каждого view
-Делать:
-один раз строить embedding index на диск
-потом матчить crop по готовому индексу
-Новый pipeline оружия
-Stage 0
-
-Оставить:
-
-parser
-pairing
-char_map
-weapon_type
-rarity detector
-Stage 1
-
-Candidate narrowing:
-
-по weapon_type
-по rarity, если она уверенно определилась
-Stage 2
-
-Embedding retrieval:
-
-DINOv2 embedding для crop
-retrieval top-N по готовому индексу refs
-Stage 3
-
-Local rerank:
-
-только среди top-N
-можно оставить текущий local score как rerank
-Stage 4
-
-Reject:
-
-top1 < T → reject
-(top1 - top2) < margin → reject
-Что уже частично добавлено в services/weapon_matcher.py
-
-Добавлены или начали добавляться:
-
-_get_dino()
-_encode_bgr_dino()
-_make_ref_views()
+1) BUILD INDEX (once)
+--------------------------------
 build_weapon_embedding_index()
-load_weapon_embedding_index()
-retrieve_top_candidates()
-новый match_weapon_crop(..., emb_index=...)
-Важный текущий блокер
-HF Hub
 
-При создании модели через:
+INPUT:
+- data/weapons.json
+- cache/enka_ref_weapons/*.png
 
-timm.create_model("vit_base_patch14_dinov2.lvd142m", pretrained=True, num_classes=0)
+PROCESS:
+- generate multiple ref views (scale/shift)
+- encode via DINO (ViT)
+- store embeddings
 
-timm может скачать pretrained weights с Hugging Face Hub.
+OUTPUT:
+cache/ref_index/weapons_dino_index.npz
 
-В логах уже был warning:
+--------------------------------
 
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-
-Это значит:
-
-DINO retrieval сейчас имеет внешнюю сетевую зависимость
-warning сам по себе не фатальный
-но первый запуск может быть медленным
-если HF недоступен, загрузка модели может стать блокером
-
-Это обязательно учитывать дальше.
-
-Что уже видно по логам
-
-Последний важный лог:
-
-ORB chars: {'characters_saved_hd': 70, 'debug_report': '...debug/orb/report.json'}
-WEAPON CACHE WARMUP: {'total': 233, 'downloaded': 0, 'skipped_exists': 233, 'skipped_no_icon': 0, 'failed': 0, ...}
-[INDEX] 0/233
-   ↳ weapon 11101 views: 7
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-
-То есть:
-
-ORB characters ок
-weapon cache warmup ок
-build weapon embedding index стартовал
-модель DINO начала тянуться через HF/timm
-процесс ещё не доведён до завершения
-Что в weapon_matcher.py надо дочистить
-
-Сейчас там смешались 2 версии логики:
-
-Старая промежуточная
-_REF_EMB_CACHE
-_get_ref_embeddings()
-on-the-fly ref embeddings
-Новая целевая
-weapons_dino_index.npz
-build_weapon_embedding_index()
-load_weapon_embedding_index()
+2) RETRIEVAL
+--------------------------------
 retrieve_top_candidates()
 
-Нужно оставить только вторую.
+INPUT:
+- crop_bgr
+- candidate_ids (filtered by type + rarity)
+- embedding index
 
-То есть удалить:
+PROCESS:
+- encode crop via DINO
+- cosine similarity vs ref embeddings
+- aggregate best per weapon_id
 
-_REF_EMB_CACHE
-_get_ref_embeddings()
-остатки on-the-fly retrieval
-Что должно быть следующим шагом
+OUTPUT:
+[(weapon_id, sim), ...]
 
-Не возвращаться к pHash и не крутить baseline.
+--------------------------------
 
-Следующий шаг:
+3) RERANK
+--------------------------------
+_score_candidate_masked()
 
-дочистить services/weapon_matcher.py
-довести до конца сборку cache/ref_index/weapons_dino_index.npz
-потом проверить:
-WEAPON EMB INDEX: ...
-WEAPONS MATCH RESULT: ...
-Критичные требования пользователя
-не придумывать код без полного релевантного кода
-сначала разбирать текущую логику
-не писать полный файл вслепую, если нет уверенности
-отвечать коротко, без воды
-если контекста не хватает, сначала запрашивать код
+INPUT:
+- crop_bgr
+- ref_png
+- emb_sim
+
+PROCESS:
+
+FOR EACH REF VIEW:
+- render ref_view (image)
+- render ref_mask (alpha-based)
+- compute align_score (edge + patch)
+
+SELECT best view
+
+THEN:
+- build crop_mask (heuristic)
+- compute appearance_score:
+  - hue_hist intersection
+  - sat/val closeness
+  - bright/dark/vivid ratios
+
+FINAL SCORE:
+0.25 * emb_sim
++ 0.20 * align_score
++ 0.55 * appearance_score
+
+OUTPUT:
+(score, extra metrics)
+
+--------------------------------
+
+4) DECISION
+--------------------------------
+match_weapon_crop()
+
+INPUT:
+- top retrieval candidates
+
+PROCESS:
+- rerank top N
+- guard logic:
+  - may prefer retrieval_best_id
+- compute margin
+
+ACCEPT CONDITIONS:
+- based on margin / appearance / align / retrieval sim
+
+OUTPUT:
+MatchDecision:
+{
+  best_id,
+  top1,
+  top2,
+  accepted,
+  extra (full debug info)
+}
+
+--------------------------------
+
+5) PIPELINE ENTRY
+--------------------------------
+match_weapons()
+
+INPUT:
+- parsed pairs
+- char_map
+- DBs
+
+PROCESS:
+- detect weapon rarity (HSV heuristic)
+- filter candidates by (type, rarity)
+- run match_weapon_crop()
+
+OUTPUT:
+- accepted/rejected debug
+- HD icons copied to assets/hd/weapons/
+
+--------------------------------
+
+--------------------------------------------------
+ASSETS / CACHE
+
+CROPS:
+assets/weapons/weapon_###.png
+
+HD OUTPUT:
+assets/hd/weapons/<id>.png
+
+REFS:
+cache/enka_ref_weapons/<id>.png
+
+INDEX:
+cache/ref_index/weapons_dino_index.npz
+
+--------------------------------------------------
+DEBUG
+
+debug/weapons/
+- accepted/
+- rejected/
+
+Each contains:
+- crop image
+- ref image
+- meta.json (full scores)
+
+--------------------------------------------------
+KNOWN PROBLEMS
+
+1) Enka refs ≠ in-card visuals
+   → mismatch in background / scale
+
+2) Crop preprocessing inconsistent
+   → affects DINO embeddings
+
+3) Appearance scoring sensitive to mask quality
+
+4) Retrieval vs rerank conflicts:
+   - retrieval correct, rerank flips
+   - rerank correct, retrieval weak
+
+5) Acceptance logic fragile (threshold-based)
+
+--------------------------------------------------
+CURRENT GOAL
+
+DO NOT:
+- blindly tune thresholds
+- rewrite pipeline
+
+DO:
+- use isolated debug scripts
+- analyze per-case behavior
+- identify failure source:
+  - retrieval
+  - rerank
+  - mask
+  - prep
+  - accept logic
+
+THEN:
+- introduce minimal targeted fixes
+
+--------------------------------------------------
+IMPORTANT RULES
+
+- No hallucinated fixes
+- No global refactors without data
+- Always debug on single controlled case first
+- Always inspect intermediate artifacts

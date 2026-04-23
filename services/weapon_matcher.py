@@ -24,12 +24,6 @@ def _load_image(path: str, flags=cv2.IMREAD_COLOR):
     return cv2.imread(path, flags)
 
 
-def _load_json(path: str) -> dict:
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
 
 def _alpha_composite_to_bg(img_rgba: np.ndarray, bg_bgr: tuple[int, int, int]) -> np.ndarray:
     if img_rgba is None:
@@ -50,15 +44,6 @@ def _alpha_composite_to_bg(img_rgba: np.ndarray, bg_bgr: tuple[int, int, int]) -
     out_g = (g.astype(np.float32) * alpha + bg_g.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
     out_r = (r.astype(np.float32) * alpha + bg_r.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
     return cv2.merge([out_b, out_g, out_r])
-
-
-RARITY_BG = {
-    1: (120, 120, 120),
-    2: (120, 150, 110),
-    3: (170, 130, 90),
-    4: (160, 110, 160),
-    5: (80, 140, 190),
-}
 
 REF_VIEW_PARAMS = [
     {"scale": 0.76, "dx": 0.00, "dy": 0.00},
@@ -130,95 +115,6 @@ def _encode_bgr_dino(img_bgr: np.ndarray) -> np.ndarray:
 
     emb = feat.squeeze(0).detach().cpu().numpy().astype(np.float32)
     return _l2norm(emb)
-
-def _debug_dump_retrieval_views(
-    crop_bgr: np.ndarray,
-    ref_png_path: str,
-    rarity: int | None,
-    wid: str,
-    size: int = 224,
-    out_dir: str = "debug/retrieval_views",
-):
-    print("DEBUG ENTER _debug_dump_retrieval_views", wid, _p(out_dir))
-    _ensure_dir(_p(out_dir))
-
-    crop_prep = _prepare_crop_for_match(crop_bgr, size=size)
-    crop_emb = _encode_bgr_dino(crop_prep)
-
-    crop_out = _p(out_dir, f"{wid}__crop_prep.png")
-    try:
-        cv2.imwrite(crop_out, crop_prep)
-    except Exception:
-        pass
-
-    rows = []
-
-    for idx, p in enumerate(REF_VIEW_PARAMS):
-        ref_view = _render_ref_view(
-            ref_png_path=ref_png_path,
-            rarity=rarity,
-            size=size,
-            scale=float(p["scale"]),
-            dx=float(p["dx"]),
-            dy=float(p["dy"]),
-        )
-        if ref_view is None:
-            rows.append({
-                "view_idx": idx,
-                "scale": p["scale"],
-                "dx": p["dx"],
-                "dy": p["dy"],
-                "sim": None,
-                "reason": "ref_view_none",
-            })
-            continue
-
-        try:
-            ref_emb = _encode_bgr_dino(ref_view)
-            sim = float(ref_emb @ crop_emb)
-        except Exception as e:
-            sim = None
-            rows.append({
-                "view_idx": idx,
-                "scale": p["scale"],
-                "dx": p["dx"],
-                "dy": p["dy"],
-                "sim": None,
-                "reason": f"encode_error: {e}",
-            })
-            continue
-
-        view_out = _p(out_dir, f"{wid}__view_{idx}__sim_{sim:.4f}.png")
-        try:
-            cv2.imwrite(view_out, ref_view)
-        except Exception:
-            pass
-
-        rows.append({
-            "view_idx": idx,
-            "scale": p["scale"],
-            "dx": p["dx"],
-            "dy": p["dy"],
-            "sim": sim,
-        })
-
-    rows_sorted = sorted(
-        rows,
-        key=lambda x: -999.0 if x.get("sim") is None else -float(x["sim"])
-    )
-
-    try:
-        with open(_p(out_dir, f"{wid}__report.json"), "w", encoding="utf-8") as f:
-            json.dump({
-                "wid": str(wid),
-                "rarity": rarity,
-                "size": size,
-                "views": rows_sorted,
-            }, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-    print(f"DEBUG retrieval dump saved for wid={wid} -> {_p(out_dir)}")
 
 def build_weapon_embedding_index(
     weaps_db: dict,
@@ -366,10 +262,6 @@ def retrieve_top_candidates(
             best_by_id[wid] = sim
 
     ranked = sorted(best_by_id.items(), key=lambda x: x[1], reverse=True)
-    if "15426" in candidate_set:
-        print("DEBUG has_15426_in_candidate_set = True")
-        print("DEBUG best sim for 15426 =", best_by_id.get("15426"))
-        print("DEBUG top10 =", ranked[:10])
     return ranked[:top_n]
 
 
@@ -390,35 +282,54 @@ def _make_ref_views(ref_png_path: str, rarity: int | None, size: int = 224) -> l
 
     return views
 
-def _render_ref_mask_view(
+def _render_ref_view_and_mask(
     ref_png_path: str,
     size: int = 160,
     scale: float = 0.84,
     dx: float = 0.0,
     dy: float = 0.0,
-) -> np.ndarray | None:
+    bg_bgr: tuple[int, int, int] = (127, 127, 127),
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     img = _load_image(ref_png_path, cv2.IMREAD_UNCHANGED)
     if img is None:
-        return None
+        return None, None
 
     if len(img.shape) == 2:
-        return None
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
 
     if img.shape[2] == 4:
         alpha = img[:, :, 3]
     else:
         gray = cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2GRAY)
         _, alpha = cv2.threshold(gray, 8, 255, cv2.THRESH_BINARY)
+        img = cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2BGRA)
+        img[:, :, 3] = alpha
 
-    h, w = alpha.shape[:2]
+    bbox = _alpha_bbox(img)
+    if bbox is not None:
+        x1, y1, x2, y2 = bbox
+        img = img[y1:y2, x1:x2].copy()
+
+    if img is None or len(img.shape) != 3 or img.shape[2] < 4:
+        return None, None
+
+    alpha = img[:, :, 3]
+    bgr = _alpha_composite_to_bg(img, bg_bgr)
+    if bgr is None:
+        return None, None
+
+    h, w = bgr.shape[:2]
     if h < 2 or w < 2:
-        return None
+        return None, None
 
-    canvas = np.zeros((size, size), dtype=np.uint8)
+    canvas = np.full((size, size, 3), bg_bgr, dtype=np.uint8)
+    mask_canvas = np.zeros((size, size), dtype=np.uint8)
 
     target = int(size * scale)
     scale_k = min(target / float(w), target / float(h))
     nw, nh = max(1, int(round(w * scale_k))), max(1, int(round(h * scale_k)))
+
+    img2 = cv2.resize(bgr, (nw, nh), interpolation=cv2.INTER_AREA)
     alpha2 = cv2.resize(alpha, (nw, nh), interpolation=cv2.INTER_AREA)
 
     x = int(round((size - nw) / 2.0 + dx * size))
@@ -427,14 +338,16 @@ def _render_ref_mask_view(
     x = max(0, min(size - nw, x))
     y = max(0, min(size - nh, y))
 
-    canvas[y:y + nh, x:x + nw] = alpha2
+    canvas[y:y + nh, x:x + nw] = img2
+    mask_canvas[y:y + nh, x:x + nw] = alpha2
 
-    _, canvas = cv2.threshold(canvas, 16, 255, cv2.THRESH_BINARY)
+    _, mask_canvas = cv2.threshold(mask_canvas, 16, 255, cv2.THRESH_BINARY)
 
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    canvas = cv2.morphologyEx(canvas, cv2.MORPH_OPEN, k, iterations=1)
-    canvas = cv2.morphologyEx(canvas, cv2.MORPH_CLOSE, k, iterations=1)
-    return canvas
+    mask_canvas = cv2.morphologyEx(mask_canvas, cv2.MORPH_OPEN, k, iterations=1)
+    mask_canvas = cv2.morphologyEx(mask_canvas, cv2.MORPH_CLOSE, k, iterations=1)
+
+    return canvas, mask_canvas
 
 
 def _masked_appearance_features(img_bgr: np.ndarray, mask: np.ndarray) -> dict:
@@ -552,15 +465,7 @@ def _score_candidate_masked(
     best_view_params = None
 
     for p in REF_VIEW_PARAMS:
-        ref_view = _render_ref_view(
-            ref_png_path=ref_png_path,
-            rarity=rarity,
-            size=size,
-            scale=float(p["scale"]),
-            dx=float(p["dx"]),
-            dy=float(p["dy"]),
-        )
-        ref_mask = _render_ref_mask_view(
+        ref_view, ref_mask = _render_ref_view_and_mask(
             ref_png_path=ref_png_path,
             size=size,
             scale=float(p["scale"]),
@@ -588,7 +493,7 @@ def _score_candidate_masked(
             "reason": "no_valid_ref_view",
         }
 
-    crop_mask = best_ref_mask.copy()
+    crop_mask = _build_crop_mask(crop_bgr)
 
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     crop_mask = cv2.erode(crop_mask, k, iterations=1)
@@ -730,14 +635,6 @@ def get_candidate_ids(
             out.append(str(wid))
     return out
 
-
-def _crop_inner(img_bgr: np.ndarray, pad_ratio: float = 0.18) -> np.ndarray:
-    h, w = img_bgr.shape[:2]
-    p = int(min(h, w) * pad_ratio)
-    if p > 0 and h - 2 * p >= 10 and w - 2 * p >= 10:
-        return img_bgr[p:h - p, p:w - p].copy()
-    return img_bgr.copy()
-
 def _letterbox_to_square(
     img_bgr: np.ndarray,
     size: int = 224,
@@ -779,52 +676,19 @@ def _alpha_bbox(img_rgba: np.ndarray):
 
 def _render_ref_view(
     ref_png_path: str,
-    rarity: int | None,
     size: int = 160,
     scale: float = 0.84,
     dx: float = 0.0,
     dy: float = 0.0,
 ) -> np.ndarray | None:
-    img = _load_image(ref_png_path, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        return None
-
-    if len(img.shape) == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
-
-    if img.shape[2] == 4:
-        bbox = _alpha_bbox(img)
-        if bbox is not None:
-            x1, y1, x2, y2 = bbox
-            img = img[y1:y2, x1:x2].copy()
-
-    bg = (127, 127, 127)
-    img = _alpha_composite_to_bg(img, bg)
-    if img is None:
-        return None
-
-    if len(img.shape) == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-
-    h, w = img.shape[:2]
-    if h < 2 or w < 2:
-        return None
-
-    canvas = np.full((size, size, 3), bg, dtype=np.uint8)
-
-    target = int(size * scale)
-    scale_k = min(target / float(w), target / float(h))
-    nw, nh = max(1, int(round(w * scale_k))), max(1, int(round(h * scale_k)))
-    img2 = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
-
-    x = int(round((size - nw) / 2.0 + dx * size))
-    y = int(round((size - nh) / 2.0 + dy * size))
-
-    x = max(0, min(size - nw, x))
-    y = max(0, min(size - nh, y))
-
-    canvas[y:y + nh, x:x + nw] = img2
-    return canvas
+    view, _ = _render_ref_view_and_mask(
+        ref_png_path=ref_png_path,
+        size=size,
+        scale=scale,
+        dx=dx,
+        dy=dy,
+    )
+    return view
 
 
 def _gray(img_bgr: np.ndarray) -> np.ndarray:
@@ -837,17 +701,35 @@ def _edge_map(img_bgr: np.ndarray) -> np.ndarray:
     e = cv2.Canny(g, 60, 140)
     return e
 
+def _build_crop_mask(img_bgr: np.ndarray, bg_bgr: tuple[int, int, int] = (127, 127, 127)) -> np.ndarray:
+    if img_bgr is None:
+        return None
 
-def _fg_mask(img_bgr: np.ndarray) -> np.ndarray:
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+
+    diff = np.max(np.abs(img_bgr.astype(np.int16) - np.array(bg_bgr, dtype=np.int16).reshape(1, 1, 3)), axis=2)
     s = hsv[:, :, 1]
     v = hsv[:, :, 2]
 
-    mask = ((s > 35) | (v > 70)).astype(np.uint8) * 255
+    mask = ((diff >= 18) | (s >= 35)) & (v >= 25)
+    mask = mask.astype(np.uint8) * 255
+
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
+
+    if np.count_nonzero(mask) < 24:
+        h, w = mask.shape[:2]
+        pad = max(2, int(min(h, w) * 0.08))
+        yy1, yy2 = pad, max(pad + 1, h - pad)
+        xx1, xx2 = pad, max(pad + 1, w - pad)
+        mask = np.zeros_like(mask)
+        mask[yy1:yy2, xx1:xx2] = 255
+
     return mask
+
+def _fg_mask(img_bgr: np.ndarray) -> np.ndarray:
+    return _build_crop_mask(img_bgr)
 
 
 def _iou(a: np.ndarray, b: np.ndarray) -> float:
@@ -885,30 +767,10 @@ def _patch_score(crop_bgr: np.ndarray, ref_bgr: np.ndarray) -> float:
         return 0.0
     return float(np.mean(scores))
 
-
-def _color_score(crop_bgr: np.ndarray, ref_bgr: np.ndarray) -> float:
-    crop_hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
-    ref_hsv = cv2.cvtColor(ref_bgr, cv2.COLOR_BGR2HSV)
-
-    crop_hist = cv2.calcHist([crop_hsv], [0, 1], None, [24, 16], [0, 180, 0, 256])
-    ref_hist = cv2.calcHist([ref_hsv], [0, 1], None, [24, 16], [0, 180, 0, 256])
-
-    crop_hist = cv2.normalize(crop_hist, None).flatten()
-    ref_hist = cv2.normalize(ref_hist, None).flatten()
-
-    score = cv2.compareHist(crop_hist, ref_hist, cv2.HISTCMP_CORREL)
-    return float((score + 1.0) / 2.0)
-
-
 def _score_crop_vs_ref(crop_bgr: np.ndarray, ref_bgr: np.ndarray) -> tuple[float, dict]:
     crop_edges = _edge_map(crop_bgr)
     ref_edges = _edge_map(ref_bgr)
-
-    crop_mask = _fg_mask(crop_bgr)
-    ref_mask = _fg_mask(ref_bgr)
-
     edge = _iou(crop_edges, ref_edges)
-    mask = _iou(crop_mask, ref_mask)
     patch = _patch_score(crop_bgr, ref_bgr)
 
     score = (
@@ -1294,9 +1156,6 @@ def match_weapons(
             type_rarity_to_ids=type_rarity_to_ids,
             weaps_db=weaps_db,
         )
-        if weapon_crop_name == "weapon_017.png":
-            print("DEBUG weapon_017 candidate_ids contains 15426:", "15426" in candidate_ids)
-            print("DEBUG weapon_017 candidate_ids sample:", candidate_ids[:20], "total=", len(candidate_ids))
 
         if not candidate_ids:
             skipped_no_candidates += 1
