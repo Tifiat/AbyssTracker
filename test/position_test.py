@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -12,6 +13,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 TEST_DIR = Path(__file__).resolve().parent
+if str(TEST_DIR) not in sys.path:
+    sys.path.insert(0, str(TEST_DIR))
+
 CROP_DIR = TEST_DIR / "crop_swords"
 OUT_DIR = TEST_DIR / "debug_reframed_swords"
 CLAYMORE_CROP_DIR = TEST_DIR / "crop_claymores"
@@ -23,7 +27,7 @@ ALL_REF_DIR = ROOT / "cache" / "enka_ref_weapons"
 WEAPONS_JSON_PATH = ROOT / "data" / "weapons.json"
 
 from crop_extractor import (
-    extract_object_with_info_from_path,
+    extract_object_with_info_from_crop,
     resize_long_side_if_needed,
 )
 
@@ -33,6 +37,16 @@ ALPHA_MASK_THRESHOLD = 32
 
 def ensure_dir(path: Path):
     path.mkdir(parents=True, exist_ok=True)
+
+
+def reset_dir(path: Path):
+    target = path.resolve()
+    test_root = TEST_DIR.resolve()
+    if target != test_root and test_root not in target.parents:
+        raise ValueError(f"Refusing to clear path outside test dir: {target}")
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
 
 
 def save_img(path: Path, img: np.ndarray):
@@ -128,7 +142,7 @@ def load_compensated_crop(
         raise FileNotFoundError(f"Unreadable crop image: {path}")
 
     crop_scaled = resize_long_side_if_needed(crop_src)
-    object_bgra, info = extract_object_with_info_from_path(path)
+    object_bgra, info = extract_object_with_info_from_crop(crop_src)
     matrix, compensation = build_square_window_compensation(
         object_bgra.shape[:2],
         info.get("applied_cuts"),
@@ -155,6 +169,17 @@ def alpha_to_binary(image_bgra: np.ndarray) -> np.ndarray:
         raise ValueError("Expected BGRA image")
     alpha = image_bgra[:, :, 3]
     return np.where(alpha > ALPHA_MASK_THRESHOLD, 255, 0).astype(np.uint8)
+
+
+def normalize_bgra_alpha(image_bgra: np.ndarray) -> np.ndarray:
+    if image_bgra.ndim != 3 or image_bgra.shape[2] != 4:
+        raise ValueError("Expected BGRA image")
+    out = image_bgra.copy()
+    alpha = out[:, :, 3]
+    invisible = alpha <= ALPHA_MASK_THRESHOLD
+    out[invisible, :3] = 0
+    out[invisible, 3] = 0
+    return out
 
 
 def load_ref_paths_by_type(weapon_type: str) -> list[Path]:
@@ -202,15 +227,15 @@ def load_bgra_from_path(path: Path) -> np.ndarray:
     if img.ndim == 2:
         bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         alpha = np.where(img > 0, 255, 0).astype(np.uint8)
-        return np.dstack([bgr, alpha])
+        return normalize_bgra_alpha(np.dstack([bgr, alpha]))
 
     if img.shape[2] == 3:
         bgra = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
         bgra[:, :, 3] = 255
-        return bgra
+        return normalize_bgra_alpha(bgra)
 
     if img.shape[2] == 4:
-        return img
+        return normalize_bgra_alpha(img)
 
     raise ValueError(f"Unsupported image shape: {img.shape}")
 
@@ -500,15 +525,6 @@ class ClaymoreReferenceReframer:
     TARGET_TOP_ENDPOINT_X = 226.0
     TARGET_BOTTOM_Y = 255.0
 
-    DEFAULT_CUT_RATIO = 0.0
-    HEAVY_BOTTOM_CUT_RATIO = 0.10
-
-    BOTTOM_HEAVY_TOP45_THRESHOLD = 0.32
-    BOTTOM_HEAVY_BOT45_THRESHOLD = 0.50
-    BOTTOM_HEAVY_WIDTH_THRESHOLD = 40.0
-    BOTTOM_HEAVY_COMPACTNESS_THRESHOLD = 1.00
-    BOTTOM_HEAVY_PEAK_W_THRESHOLD = 0.48
-
     WINDOW_PROTOTYPES = {
         "12101": {
             "features": [0.141456, 0.319997, 0.53545, 31.066919, 1.18641, 0.404255, 0.498972, 0.68254, 0.569096, 0.536711, 1.972395],
@@ -561,10 +577,10 @@ class ClaymoreReferenceReframer:
         },
         "12406": {
             "features": [0.176909, 0.3045, 0.529603, 46.534206, 1.096627, 0.510638, 0.52175, 0.603175, 0.563936, 0.517923, 1.757437],
-            "center": 0.5375,
-            "span": 0.925,
-            "length": 322.99,
-            "midpoint": [114.5, 129.0],
+            "center": 0.495,
+            "span": 0.88,
+            "length": 340.07,
+            "midpoint": [122.5, 127.5],
         },
         "12409": {
             "features": [0.082088, 0.242042, 0.533132, 67.235092, 0.95354, 0.531915, 0.552358, 0.539683, 0.577096, 0.754204, 2.170608],
@@ -586,6 +602,20 @@ class ClaymoreReferenceReframer:
             "span": 0.575,
             "length": 293.51,
             "midpoint": [132.5, 118.0],
+        },
+        "12417": {
+            "features": [0.173224, 0.392424, 0.453379, 33.86739, 1.098511, 0.404255, 0.492805, 0.634921, 0.545604, 0.591254, 2.175574],
+            "center": 0.44,
+            "span": 0.816,
+            "length": 341.4,
+            "midpoint": [126.5, 127.5],
+        },
+        "12424": {
+            "features": [0.18173, 0.281805, 0.554959, 34.359905, 1.183723, 0.425532, 0.546835, 0.603175, 0.574993, 0.484487, 1.797893],
+            "center": 0.465,
+            "span": 0.83,
+            "length": 338.1,
+            "midpoint": [128.0, 127.5],
         },
         "12430": {
             "features": [0.180936, 0.230559, 0.645218, 34.575542, 0.830196, 0.617021, 0.537038, 0.714286, 0.573177, 0.705588, 2.739482],
@@ -635,10 +665,12 @@ class ClaymoreReferenceReframer:
         "12401": {"center": 0.513, "span": 0.925, "length": 316.24, "midpoint": [120.5, 135.5]},
         "12402": {"center": 0.513, "span": 0.575, "length": 299.33, "midpoint": [116.5, 131.0]},
         "12405": {"center": 0.500, "span": 0.950, "length": 331.23, "midpoint": [119.0, 133.0]},
-        "12406": {"center": 0.5375, "span": 0.925, "length": 322.99, "midpoint": [114.5, 129.0]},
+        "12406": {"center": 0.495, "span": 0.880, "length": 340.07, "midpoint": [122.5, 127.5]},
         "12409": {"center": 0.525, "span": 0.950, "length": 310.00, "midpoint": [127.5, 131.0]},
         "12412": {"center": 0.5125, "span": 0.975, "length": 253.31, "midpoint": [117.0, 166.0]},
         "12415": {"center": 0.5375, "span": 0.575, "length": 293.51, "midpoint": [132.5, 118.0]},
+        "12417": {"center": 0.440, "span": 0.816, "length": 341.40, "midpoint": [126.5, 127.5]},
+        "12424": {"center": 0.465, "span": 0.830, "length": 338.10, "midpoint": [128.0, 127.5]},
         "12430": {"center": 0.538, "span": 0.925, "length": 392.19, "midpoint": [124.5, 101.0]},
         "12431": {"center": 0.488, "span": 0.725, "length": 282.97, "midpoint": [139.5, 119.0]},
         "12432": {"center": 0.5125, "span": 0.975, "length": 314.41, "midpoint": [116.0, 137.0]},
@@ -658,46 +690,7 @@ class ClaymoreReferenceReframer:
 
     MIN_SCALE = 0.75
     MAX_SCALE = 1.35
-
-    def select_ref_cut_ratio(self, object_bgra: np.ndarray) -> float:
-        if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
-            raise ValueError("Expected BGRA image")
-
-        alpha = object_bgra[:, :, 3]
-        binary = np.where(alpha > ALPHA_MASK_THRESHOLD, 255, 0).astype(np.uint8)
-
-        contour = self._largest_contour(binary)
-        if contour is None or len(contour) < 2:
-            raise ValueError("Failed to build contour for reference")
-
-        p0, p1 = self._farthest_pair_on_hull(contour)
-        pts = self._binary_points(binary)
-        if len(pts) == 0:
-            raise ValueError("Reference binary mask is empty")
-
-        top, axis_unit, axis_len = self._axis_geometry(p0, p1)
-        rel = pts - top[None, :]
-        proj = rel @ axis_unit
-        perp = np.array([-axis_unit[1], axis_unit[0]], dtype=np.float32)
-        side = rel @ perp
-
-        top45 = float(np.mean(proj <= axis_len * 0.45))
-        bot45 = float(np.mean(proj >= axis_len * 0.55))
-        width_like = float(np.std(side) * 2.0)
-        width_like = max(width_like, 1e-6)
-        compactness = float(len(pts)) / float(axis_len * width_like)
-        peak_w = self._peak_width_ratio(proj, side, axis_len)
-
-        if (
-            top45 <= self.BOTTOM_HEAVY_TOP45_THRESHOLD
-            and bot45 >= self.BOTTOM_HEAVY_BOT45_THRESHOLD
-            and width_like <= self.BOTTOM_HEAVY_WIDTH_THRESHOLD
-            and compactness <= self.BOTTOM_HEAVY_COMPACTNESS_THRESHOLD
-            and peak_w <= self.BOTTOM_HEAVY_PEAK_W_THRESHOLD
-        ):
-            return self.HEAVY_BOTTOM_CUT_RATIO
-
-        return self.DEFAULT_CUT_RATIO
+    MAX_WINDOW_SCALE = 1.95
 
     def select_window_params(self, object_bgra: np.ndarray) -> dict:
         features = self._geometry_features(object_bgra)
@@ -933,7 +926,7 @@ class ClaymoreReferenceReframer:
 
         scale = float(target_visible_length) / float(visible_length)
         scale *= float(extra_scale)
-        scale = float(np.clip(scale, self.MIN_SCALE, self.MAX_SCALE))
+        scale = float(np.clip(scale, self.MIN_SCALE, self.MAX_WINDOW_SCALE))
 
         tx = float(target_midpoint[0] - scale * visible_mid[0])
         ty = float(target_midpoint[1] - scale * visible_mid[1])
@@ -1280,7 +1273,7 @@ class PolearmReferenceReframer(SwordReferenceReframer):
 
 
 def run_sword_reframe_debug():
-    ensure_dir(OUT_DIR)
+    reset_dir(OUT_DIR)
 
     crop_files = sorted(CROP_DIR.glob("*.png"))
     ref_files = load_all_sword_ref_paths()
@@ -1335,7 +1328,7 @@ def run_sword_reframe_debug():
 
 
 def run_claymore_reframe_debug():
-    ensure_dir(CLAYMORE_OUT_DIR)
+    reset_dir(CLAYMORE_OUT_DIR)
 
     crop_files = sorted(CLAYMORE_CROP_DIR.glob("*.png"))
     ref_files = load_all_claymore_ref_paths()
@@ -1392,7 +1385,7 @@ def run_claymore_reframe_debug():
 
 
 def run_polearm_reframe_debug():
-    ensure_dir(POLEARM_OUT_DIR)
+    reset_dir(POLEARM_OUT_DIR)
 
     crop_files = sorted(POLEARM_CROP_DIR.glob("*.png"))
     ref_files = load_all_polearm_ref_paths()

@@ -11,9 +11,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 TEST_DIR = Path(__file__).resolve().parent
+CROP_SWORDS_DIR = TEST_DIR / "crop_swords"
+CROP_CLAYMORES_DIR = TEST_DIR / "crop_claymores"
 CROP_POLEARMS_DIR = TEST_DIR / "crop_polearms"
 CROPS_MANY_DIR = TEST_DIR / "crops_many"
 DEBUG_ROOT = TEST_DIR / "debug_step2self_5_2"
+SWORDS_OUT_DIR = DEBUG_ROOT / "crop_swords"
+CLAYMORES_OUT_DIR = DEBUG_ROOT / "crop_claymores"
 POLEARMS_OUT_DIR = DEBUG_ROOT / "polearms"
 CROP_POLEARMS_OUT_DIR = DEBUG_ROOT / "crop_polearms"
 CROPS_MANY_OUT_DIR = DEBUG_ROOT / "crops_many"
@@ -28,14 +32,27 @@ MAX_OCCUPANCY_LEAD_IN = 16
 MIN_BORDER_TAIL_OCCUPANCY = 0.30
 MAX_OCCUPANCY_EXTENSION = 4
 MAX_OCCUPANCY_GAP = 1
+BORDER_STRIPE_MIN_SUPPORT_FRACTION = 0.80
 BG_SAMPLE_EDGE_DILATE_ITERATIONS = 1
 BG_SAMPLE_MASK_DILATE_ITERATIONS = 1
+BG_SAMPLE_MIN_MASK_DISTANCE = 10.0
+BG_SAMPLE_MIN_EDGE_DISTANCE = 4.0
 BG_LOCAL_KERNELS = (9, 17, 33, 65, 129)
 BG_LOCAL_MIN_COUNT = 20
 BG_LOCAL_MIN_FRACTION = 0.015
 BG_DIFF_BASE_THRESHOLD = 22.0
 BG_DIFF_ROUGHNESS_MUL = 1.2
 BG_DIFF_MAX_THRESHOLD = 48.0
+RARITY_COLOR_MIN_SAT = 20
+RARITY_COLOR_MIN_VALUE = 40
+RARITY_GRAY_MAX_MEDIAN_SAT = 35.0
+RARITY_GRAY_MAX_COLOR_FRACTION = 0.35
+RARITY_HUE_ANCHORS = {
+    2: 77.0,
+    3: 102.0,
+    4: 132.0,
+    5: 14.0,
+}
 
 #SCALE CROP
 def resize_long_side_if_needed(img_bgr: np.ndarray):
@@ -195,12 +212,118 @@ def _build_background_sample_mask(mask: np.ndarray, edge_hint: np.ndarray) -> np
         iterations=BG_SAMPLE_MASK_DILATE_ITERATIONS,
     )
 
-    samples = np.logical_and(edge_block == 0, mask_block == 0).astype(np.uint8) * 255
+    dist_to_mask = cv2.distanceTransform(
+        (mask == 0).astype(np.uint8),
+        cv2.DIST_L2,
+        3,
+    )
+    dist_to_edge = cv2.distanceTransform(
+        (edge_hint == 0).astype(np.uint8),
+        cv2.DIST_L2,
+        3,
+    )
+
+    samples = np.logical_and.reduce([
+        edge_block == 0,
+        mask_block == 0,
+        dist_to_mask >= BG_SAMPLE_MIN_MASK_DISTANCE,
+        dist_to_edge >= BG_SAMPLE_MIN_EDGE_DISTANCE,
+    ]).astype(np.uint8) * 255
     samples[:2, :] = 0
     samples[-2:, :] = 0
     samples[:, :2] = 0
     samples[:, -2:] = 0
     return samples
+
+
+def _hue_distance(a: float, b: float) -> float:
+    d = abs(float(a) - float(b))
+    return min(d, 180.0 - d)
+
+
+def detect_rarity_from_background_samples(
+    img_bgr: np.ndarray,
+    sample_mask: np.ndarray,
+) -> dict:
+    pixels = img_bgr[sample_mask > 0]
+    if pixels.size == 0:
+        return {
+            "rarity": None,
+            "confidence": 0.0,
+            "sample_pixels": 0,
+            "median_hue": None,
+            "median_saturation": None,
+            "median_value": None,
+            "color_fraction": 0.0,
+        }
+
+    hsv = cv2.cvtColor(pixels.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    saturation = hsv[:, 1].astype(np.float32)
+    value = hsv[:, 2].astype(np.float32)
+    color_mask = np.logical_and(saturation >= RARITY_COLOR_MIN_SAT, value >= RARITY_COLOR_MIN_VALUE)
+    color_fraction = float(np.count_nonzero(color_mask)) / float(len(hsv))
+
+    median_saturation = float(np.median(saturation))
+    median_value = float(np.median(value))
+    if median_saturation <= RARITY_GRAY_MAX_MEDIAN_SAT and color_fraction <= RARITY_GRAY_MAX_COLOR_FRACTION:
+        confidence = max(
+            0.0,
+            min(
+                1.0,
+                (RARITY_GRAY_MAX_MEDIAN_SAT - median_saturation) / RARITY_GRAY_MAX_MEDIAN_SAT,
+            ),
+        )
+        return {
+            "rarity": 1,
+            "confidence": confidence,
+            "sample_pixels": int(len(pixels)),
+            "median_hue": None,
+            "median_saturation": median_saturation,
+            "median_value": median_value,
+            "color_fraction": color_fraction,
+        }
+
+    hue_source = hsv[color_mask, 0] if np.count_nonzero(color_mask) >= 64 else hsv[:, 0]
+    median_hue = float(np.median(hue_source.astype(np.float32)))
+    distances = {
+        rarity: _hue_distance(median_hue, anchor)
+        for rarity, anchor in RARITY_HUE_ANCHORS.items()
+    }
+    rarity = min(distances, key=distances.get)
+    best_distance = float(distances[rarity])
+    confidence = max(0.0, min(1.0, 1.0 - best_distance / 45.0))
+
+    return {
+        "rarity": int(rarity),
+        "confidence": confidence,
+        "sample_pixels": int(len(pixels)),
+        "median_hue": median_hue,
+        "median_saturation": median_saturation,
+        "median_value": median_value,
+        "color_fraction": color_fraction,
+    }
+
+
+def detect_rarity_from_crop(crop_bgr: np.ndarray) -> dict:
+    crop_scaled = resize_long_side_if_needed(crop_bgr)
+    em_scharr = _edge_map_scharr_max_channel_auto(crop_scaled)
+    mask_base = edge_mask_base(em_scharr)
+
+    seed, info = cleanup_mask_by_detected_border_hard(mask_base)
+    seed_fixed = restore_bridges_from_cut_lines(seed, info)
+    filled_fixed = fill_internal_holes(seed_fixed)
+    sample_mask = _build_background_sample_mask(filled_fixed, em_scharr)
+    rarity_info = detect_rarity_from_background_samples(crop_scaled, sample_mask)
+    rarity_info["scaled_shape"] = crop_scaled.shape[:2]
+    rarity_info["applied_cuts"] = dict(info.get("applied", {}))
+    return rarity_info
+
+
+def detect_rarity_from_path(path: Path) -> dict:
+    crop_bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if crop_bgr is None:
+        raise FileNotFoundError(f"Unreadable image: {path}")
+    return detect_rarity_from_crop(crop_bgr)
 
 
 def _local_background_model(
@@ -420,8 +543,12 @@ def _robust_border_width(
     min_nonzero_samples: int = 3,
     min_width: int = 2,
 ) -> int:
+    min_support = max(
+        int(min_nonzero_samples),
+        int(np.ceil(float(len(runs)) * BORDER_STRIPE_MIN_SUPPORT_FRACTION)),
+    )
     nz = [int(v) for v in runs if int(v) >= min_width]
-    if len(nz) < min_nonzero_samples:
+    if len(nz) < min_support:
         return 0
     nz.sort()
     return int(round(float(np.median(nz))))
@@ -728,11 +855,14 @@ def extract_object_with_info_from_crop(crop_bgr: np.ndarray) -> tuple[np.ndarray
         em_scharr,
         min_area=150,
     )
+    rarity_info = detect_rarity_from_background_samples(crop_scaled, bg_info["sample_mask"])
     obj = make_object_bgra(crop_scaled, filled_fixed)
     return obj, {
         "scaled_shape": crop_scaled.shape[:2],
         "applied_cuts": dict(info.get("applied", {})),
         "cleanup_info": info,
+        "rarity": rarity_info["rarity"],
+        "rarity_info": rarity_info,
         "background_info": {
             "sample_pixels": int(bg_info.get("sample_pixels", 0)),
         },
@@ -859,6 +989,16 @@ def _run_debug_dir(
 
 def run_debug2():
     _run_debug_dir(
+        CROP_SWORDS_DIR,
+        (SWORDS_OUT_DIR,),
+        "swords",
+    )
+    _run_debug_dir(
+        CROP_CLAYMORES_DIR,
+        (CLAYMORES_OUT_DIR,),
+        "claymores",
+    )
+    _run_debug_dir(
         CROP_POLEARMS_DIR,
         (POLEARMS_OUT_DIR, CROP_POLEARMS_OUT_DIR),
         "polearms",
@@ -872,5 +1012,3 @@ def run_debug2():
     print("[DONE]")
 if __name__ == "__main__":
     run_debug2()
-
-
