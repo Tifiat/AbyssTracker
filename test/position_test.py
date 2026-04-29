@@ -212,6 +212,14 @@ def load_all_polearm_ref_paths() -> list[Path]:
     return load_ref_paths_by_type("Polearm")
 
 
+def load_all_bow_ref_paths() -> list[Path]:
+    return load_ref_paths_by_type("Bow")
+
+
+def load_all_catalyst_ref_paths() -> list[Path]:
+    return load_ref_paths_by_type("Catalyst")
+
+
 def load_bgra_from_path(path: Path) -> np.ndarray:
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if img is None:
@@ -523,6 +531,26 @@ class SwordReferenceReframer:
     def _top_endpoint_x(self, p0: np.ndarray, p1: np.ndarray) -> float:
         top = p0 if p0[1] < p1[1] else p1
         return float(top[0])
+
+
+class IdentityReferenceReframer:
+    def select_ref_cut_ratio(self, object_bgra: np.ndarray) -> float:
+        if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
+            raise ValueError("Expected BGRA image")
+        return 0.0
+
+    def reframe(self, object_bgra: np.ndarray) -> np.ndarray:
+        if object_bgra.ndim != 3 or object_bgra.shape[2] != 4:
+            raise ValueError("Expected BGRA image")
+        return object_bgra.copy()
+
+
+class BowReferenceReframer(IdentityReferenceReframer):
+    pass
+
+
+class CatalystReferenceReframer(IdentityReferenceReframer):
+    pass
 
 
 class ClaymoreReferenceReframer:
