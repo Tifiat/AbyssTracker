@@ -1,0 +1,843 @@
+from __future__ import annotations
+
+import cv2
+import numpy as np
+
+SEARCH_DEPTH = 30
+MIN_STRIPE_RUN = 1
+MAX_STRIPE_LEAD_IN = 4
+MIN_OCCUPANCY_RUN = 2
+MIN_BORDER_OCCUPANCY = 0.70
+MAX_OCCUPANCY_LEAD_IN = 16
+MIN_BORDER_TAIL_OCCUPANCY = 0.30
+MAX_OCCUPANCY_EXTENSION = 4
+MAX_OCCUPANCY_GAP = 1
+BORDER_STRIPE_MIN_SUPPORT_FRACTION = 0.80
+BG_SAMPLE_EDGE_DILATE_ITERATIONS = 1
+BG_SAMPLE_MASK_DILATE_ITERATIONS = 1
+BG_SAMPLE_MIN_MASK_DISTANCE = 10.0
+BG_SAMPLE_MIN_EDGE_DISTANCE = 4.0
+BG_LOCAL_KERNELS = (9, 17, 33, 65, 129)
+BG_LOCAL_MIN_COUNT = 20
+BG_LOCAL_MIN_FRACTION = 0.015
+BG_DIFF_BASE_THRESHOLD = 22.0
+BG_DIFF_ROUGHNESS_MUL = 1.2
+BG_DIFF_MAX_THRESHOLD = 48.0
+RARITY_COLOR_MIN_SAT = 20
+RARITY_COLOR_MIN_VALUE = 40
+RARITY_GRAY_MAX_MEDIAN_SAT = 35.0
+RARITY_GRAY_MAX_COLOR_FRACTION = 0.35
+RARITY_HUE_ANCHORS = {
+    2: 77.0,
+    3: 102.0,
+    4: 132.0,
+    5: 14.0,
+}
+
+# Scale crop to the calibrated 256px long side.
+def resize_long_side_if_needed(img_bgr: np.ndarray):
+    h, w = img_bgr.shape[:2]
+    long_side = max(h, w)
+    if long_side <= 0:
+        return img_bgr.copy()
+
+    scale = float(256) / float(long_side)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    if scale < 1:
+        return cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+    else:
+        return cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_CUBIC)
+
+# Build an adaptive edge map from all color channels.
+def _edge_map_scharr_max_channel_auto(img_bgr: np.ndarray) -> np.ndarray:
+    img = img_bgr.astype(np.float32)
+    img = cv2.GaussianBlur(img, (5, 5), 0)
+
+    dx = cv2.Scharr(img, cv2.CV_32F, 1, 0)
+    dy = cv2.Scharr(img, cv2.CV_32F, 0, 1)
+    mag = cv2.magnitude(dx, dy)
+    mag = mag[..., 0] + mag[..., 1] + mag[..., 2]
+
+    nz = mag[mag > 0]
+    if nz.size == 0:
+        return np.zeros(img_bgr.shape[:2], dtype=np.uint8)
+
+    thr = np.percentile(nz, 66)
+    edge = (mag >= thr).astype(np.uint8) * 255
+
+    kernel = np.ones((3, 3), np.uint8)
+    edge = cv2.morphologyEx(edge, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    edge = normalize_mask(edge)
+    edge = keep_components_by_area(edge, min_area=5)
+    return edge
+
+# Normalize any mask to 0/255.
+def normalize_mask(mask: np.ndarray) -> np.ndarray:
+    return np.where(mask > 0, 255, 0).astype(np.uint8)
+
+# Drop tiny connected components.
+def keep_components_by_area(mask: np.ndarray, min_area: int = 24) -> np.ndarray:
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (mask > 0).astype(np.uint8),
+        connectivity=8,
+    )
+
+    if n <= 1:
+        return normalize_mask(mask)
+
+    out = np.zeros_like(mask, dtype=np.uint8)
+
+    for label in range(1, n):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area >= min_area:
+            out[labels == label] = 255
+
+    return normalize_mask(out)
+
+
+def remove_small_border_components(mask: np.ndarray, max_area: int = 800) -> np.ndarray:
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (mask > 0).astype(np.uint8),
+        connectivity=8,
+    )
+
+    if n <= 1:
+        return normalize_mask(mask)
+
+    h, w = mask.shape
+    out = np.zeros_like(mask, dtype=np.uint8)
+
+    for label in range(1, n):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        ww = int(stats[label, cv2.CC_STAT_WIDTH])
+        hh = int(stats[label, cv2.CC_STAT_HEIGHT])
+        touches_border = (x == 0 or y == 0 or x + ww == w or y + hh == h)
+
+        if touches_border and area <= max_area:
+            continue
+        out[labels == label] = 255
+
+    return normalize_mask(out)
+
+
+def remove_weak_secondary_components(mask: np.ndarray, min_ratio_to_largest: float = 0.16) -> np.ndarray:
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (mask > 0).astype(np.uint8),
+        connectivity=8,
+    )
+
+    if n <= 1:
+        return normalize_mask(mask)
+
+    areas = [int(stats[label, cv2.CC_STAT_AREA]) for label in range(1, n)]
+    largest = max(areas) if areas else 0
+    if largest <= 0:
+        return normalize_mask(mask)
+
+    min_keep_area = max(150, int(round(largest * min_ratio_to_largest)))
+    out = np.zeros_like(mask, dtype=np.uint8)
+    for label in range(1, n):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area >= min_keep_area:
+            out[labels == label] = 255
+
+    return normalize_mask(out)
+
+
+def remove_confirmed_background_regions(
+    mask: np.ndarray,
+    fg_gate: np.ndarray,
+    min_bg_area: int = 24,
+) -> np.ndarray:
+    bg_candidate = np.logical_and(mask > 0, fg_gate == 0).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(bg_candidate, connectivity=8)
+
+    if n <= 1:
+        return normalize_mask(mask)
+
+    remove = np.zeros_like(mask, dtype=np.uint8)
+    for label in range(1, n):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area >= min_bg_area:
+            remove[labels == label] = 255
+
+    out = mask.copy()
+    out[remove > 0] = 0
+    return normalize_mask(out)
+
+# Clean the foreground mask.
+def _clean_foreground_mask(mask: np.ndarray, min_area: int = 150) -> np.ndarray:
+    out = keep_components_by_area(mask, min_area=min_area)
+    out = remove_small_border_components(out, max_area=800)
+    out = remove_weak_secondary_components(out, min_ratio_to_largest=0.16)
+    return normalize_mask(out)
+
+
+def _build_background_sample_mask(mask: np.ndarray, edge_hint: np.ndarray) -> np.ndarray:
+    mask = normalize_mask(mask)
+    edge_hint = normalize_mask(edge_hint)
+
+    edge_block = cv2.dilate(
+        edge_hint,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        iterations=BG_SAMPLE_EDGE_DILATE_ITERATIONS,
+    )
+    mask_block = cv2.dilate(
+        mask,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+        iterations=BG_SAMPLE_MASK_DILATE_ITERATIONS,
+    )
+
+    dist_to_mask = cv2.distanceTransform(
+        (mask == 0).astype(np.uint8),
+        cv2.DIST_L2,
+        3,
+    )
+    dist_to_edge = cv2.distanceTransform(
+        (edge_hint == 0).astype(np.uint8),
+        cv2.DIST_L2,
+        3,
+    )
+
+    samples = np.logical_and.reduce([
+        edge_block == 0,
+        mask_block == 0,
+        dist_to_mask >= BG_SAMPLE_MIN_MASK_DISTANCE,
+        dist_to_edge >= BG_SAMPLE_MIN_EDGE_DISTANCE,
+    ]).astype(np.uint8) * 255
+    samples[:2, :] = 0
+    samples[-2:, :] = 0
+    samples[:, :2] = 0
+    samples[:, -2:] = 0
+    return samples
+
+
+def _hue_distance(a: float, b: float) -> float:
+    d = abs(float(a) - float(b))
+    return min(d, 180.0 - d)
+
+
+def detect_rarity_from_background_samples(
+    img_bgr: np.ndarray,
+    sample_mask: np.ndarray,
+) -> dict:
+    pixels = img_bgr[sample_mask > 0]
+    if pixels.size == 0:
+        return {
+            "rarity": None,
+            "confidence": 0.0,
+            "sample_pixels": 0,
+            "median_hue": None,
+            "median_saturation": None,
+            "median_value": None,
+            "color_fraction": 0.0,
+        }
+
+    hsv = cv2.cvtColor(pixels.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    saturation = hsv[:, 1].astype(np.float32)
+    value = hsv[:, 2].astype(np.float32)
+    color_mask = np.logical_and(saturation >= RARITY_COLOR_MIN_SAT, value >= RARITY_COLOR_MIN_VALUE)
+    color_fraction = float(np.count_nonzero(color_mask)) / float(len(hsv))
+
+    median_saturation = float(np.median(saturation))
+    median_value = float(np.median(value))
+    if median_saturation <= RARITY_GRAY_MAX_MEDIAN_SAT and color_fraction <= RARITY_GRAY_MAX_COLOR_FRACTION:
+        confidence = max(
+            0.0,
+            min(
+                1.0,
+                (RARITY_GRAY_MAX_MEDIAN_SAT - median_saturation) / RARITY_GRAY_MAX_MEDIAN_SAT,
+            ),
+        )
+        return {
+            "rarity": 1,
+            "confidence": confidence,
+            "sample_pixels": int(len(pixels)),
+            "median_hue": None,
+            "median_saturation": median_saturation,
+            "median_value": median_value,
+            "color_fraction": color_fraction,
+        }
+
+    hue_source = hsv[color_mask, 0] if np.count_nonzero(color_mask) >= 64 else hsv[:, 0]
+    median_hue = float(np.median(hue_source.astype(np.float32)))
+    distances = {
+        rarity: _hue_distance(median_hue, anchor)
+        for rarity, anchor in RARITY_HUE_ANCHORS.items()
+    }
+    rarity = min(distances, key=distances.get)
+    best_distance = float(distances[rarity])
+    confidence = max(0.0, min(1.0, 1.0 - best_distance / 45.0))
+
+    return {
+        "rarity": int(rarity),
+        "confidence": confidence,
+        "sample_pixels": int(len(pixels)),
+        "median_hue": median_hue,
+        "median_saturation": median_saturation,
+        "median_value": median_value,
+        "color_fraction": color_fraction,
+    }
+
+
+def detect_rarity_from_crop(crop_bgr: np.ndarray) -> dict:
+    crop_scaled = resize_long_side_if_needed(crop_bgr)
+    em_scharr = _edge_map_scharr_max_channel_auto(crop_scaled)
+    mask_base = edge_mask_base(em_scharr)
+
+    seed, info = cleanup_mask_by_detected_border_hard(mask_base)
+    seed_fixed = restore_bridges_from_cut_lines(seed, info)
+    filled_fixed = fill_internal_holes(seed_fixed)
+    sample_mask = _build_background_sample_mask(filled_fixed, em_scharr)
+    rarity_info = detect_rarity_from_background_samples(crop_scaled, sample_mask)
+    rarity_info["scaled_shape"] = crop_scaled.shape[:2]
+    rarity_info["applied_cuts"] = dict(info.get("applied", {}))
+    return rarity_info
+
+
+def _local_background_model(
+    img_bgr: np.ndarray,
+    sample_mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    h, w = sample_mask.shape
+    img_f32 = img_bgr.astype(np.float32)
+    sample_weight = (sample_mask > 0).astype(np.float32)
+
+    bg = np.zeros((h, w, 3), dtype=np.float32)
+    rough = np.zeros((h, w), dtype=np.float32)
+    remaining = np.ones((h, w), dtype=bool)
+
+    for kernel_size in BG_LOCAL_KERNELS:
+        count = cv2.boxFilter(
+            sample_weight,
+            cv2.CV_32F,
+            (kernel_size, kernel_size),
+            normalize=False,
+            borderType=cv2.BORDER_REFLECT,
+        )
+        min_count = max(
+            float(BG_LOCAL_MIN_COUNT),
+            float(kernel_size * kernel_size) * BG_LOCAL_MIN_FRACTION,
+        )
+        valid = count >= min_count
+        take = np.logical_and(remaining, valid)
+        if not np.any(take):
+            continue
+
+        color_sum = cv2.boxFilter(
+            img_f32 * sample_weight[..., None],
+            cv2.CV_32F,
+            (kernel_size, kernel_size),
+            normalize=False,
+            borderType=cv2.BORDER_REFLECT,
+        )
+        color_sq_sum = cv2.boxFilter(
+            (img_f32 ** 2) * sample_weight[..., None],
+            cv2.CV_32F,
+            (kernel_size, kernel_size),
+            normalize=False,
+            borderType=cv2.BORDER_REFLECT,
+        )
+        mean = color_sum / np.maximum(count[..., None], 1.0)
+        var = np.maximum(color_sq_sum / np.maximum(count[..., None], 1.0) - mean ** 2, 0.0)
+
+        bg[take] = mean[take]
+        rough[take] = np.sqrt(np.mean(var, axis=2))[take]
+        remaining[take] = False
+        if not np.any(remaining):
+            break
+
+    if np.any(remaining):
+        samples = img_f32[sample_weight > 0]
+        fallback = samples.mean(axis=0) if samples.size else np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        bg[remaining] = fallback
+        rough[remaining] = 20.0
+
+    return bg, rough
+
+
+def build_foreground_gate_from_empty_regions(
+    img_bgr: np.ndarray,
+    mask: np.ndarray,
+    edge_hint: np.ndarray,
+    *,
+    return_debug: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict]:
+    sample_mask = _build_background_sample_mask(mask, edge_hint)
+    bg, rough = _local_background_model(img_bgr, sample_mask)
+
+    diff = np.linalg.norm(img_bgr.astype(np.float32) - bg, axis=2)
+    threshold = np.clip(
+        BG_DIFF_BASE_THRESHOLD + BG_DIFF_ROUGHNESS_MUL * rough,
+        BG_DIFF_BASE_THRESHOLD,
+        BG_DIFF_MAX_THRESHOLD,
+    )
+
+    bg_like = (diff <= threshold).astype(np.uint8) * 255
+    fg_gate = np.where(bg_like > 0, 0, 255).astype(np.uint8)
+
+    k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    fg_gate = cv2.morphologyEx(fg_gate, cv2.MORPH_OPEN, k3, iterations=1)
+    fg_gate = cv2.morphologyEx(fg_gate, cv2.MORPH_CLOSE, k3, iterations=1)
+    fg_gate = normalize_mask(fg_gate)
+
+    if not return_debug:
+        return fg_gate
+
+    return fg_gate, {
+        "sample_mask": sample_mask,
+        "bg_like": bg_like,
+        "diff": diff,
+        "threshold": threshold,
+        "sample_pixels": int(np.count_nonzero(sample_mask)),
+    }
+
+
+def _apply_foreground_gate_from_empty_regions(
+    img_bgr: np.ndarray,
+    mask: np.ndarray,
+    edge_hint: np.ndarray,
+    *,
+    min_area: int = 150,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    fg_gate, gate_debug = build_foreground_gate_from_empty_regions(
+        img_bgr,
+        mask,
+        edge_hint,
+        return_debug=True,
+    )
+
+    gated = remove_confirmed_background_regions(mask, fg_gate, min_bg_area=24)
+    gated = _clean_foreground_mask(gated, min_area=min_area)
+    return gated, fg_gate, gate_debug
+
+
+def edge_mask_base(precomputed_edges: np.ndarray) -> np.ndarray:
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    mask = precomputed_edges.copy()
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
+
+    mask = cv2.medianBlur(mask, 3)
+    mask = normalize_mask(mask)
+    mask = cv2.erode(mask, k, iterations=1)
+
+    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+    mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
+
+    mask = keep_components_by_area(mask, min_area=50)
+    mask = normalize_mask(mask)
+    return mask
+# Fill internal holes that are not connected to the image border.
+def fill_internal_holes(mask: np.ndarray) -> np.ndarray:
+    fg = (mask > 0).astype(np.uint8)
+    bg = (fg == 0).astype(np.uint8)
+
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(bg, connectivity=8)
+    if n <= 1:
+        return normalize_mask(mask)
+
+    holes = np.zeros_like(mask, dtype=np.uint8)
+    h, w = mask.shape
+
+    for label in range(1, n):
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        ww = int(stats[label, cv2.CC_STAT_WIDTH])
+        hh = int(stats[label, cv2.CC_STAT_HEIGHT])
+        touches_border = (x == 0 or y == 0 or x + ww == w or y + hh == h)
+        if not touches_border:
+            holes[labels == label] = 255
+
+    filled = cv2.bitwise_or(mask, holes)
+    return normalize_mask(filled)
+
+# Border stripe cleanup helpers.
+
+# Sample points used to detect border runs.
+def _sample_positions(length: int) -> list[int]:
+    raw = [0.15, 0.30, 0.50, 0.70, 0.85]
+    out = []
+    for r in raw:
+        p = int(round((length - 1) * r))
+        p = max(0, min(length - 1, p))
+        out.append(p)
+    return sorted(set(out))
+
+# Measure white runs from a selected side.
+def _run_white_from_side(mask: np.ndarray, idx: int, side: str) -> int:
+    h, w = mask.shape
+
+    if side in ("left", "right"):
+        length = w
+    elif side in ("top", "bottom"):
+        length = h
+    else:
+        raise ValueError(f"Unsupported side: {side}")
+
+    limit = min(length, SEARCH_DEPTH)
+
+    def get_value(pos: int) -> int:
+        if side == "left":
+            return int(mask[idx, pos])
+        if side == "right":
+            return int(mask[idx, w - 1 - pos])
+        if side == "top":
+            return int(mask[pos, idx])
+        if side == "bottom":
+            return int(mask[h - 1 - pos, idx])
+        raise ValueError(f"Unsupported side: {side}")
+
+    p = 0
+    while p < limit:
+        while p < limit and get_value(p) == 0:
+            p += 1
+        if p >= limit:
+            return 0
+
+        start = p
+        if start > MAX_STRIPE_LEAD_IN:
+            return 0
+        while p < limit and get_value(p) > 0:
+            p += 1
+        run = p - start
+
+        if run >= MIN_STRIPE_RUN:
+            return start + run
+
+    return 0
+
+# Estimate border stripe thickness from several sampled lines.
+def _robust_border_width(
+    runs: list[int],
+    min_nonzero_samples: int = 3,
+    min_width: int = 2,
+) -> int:
+    nz = [int(v) for v in runs if int(v) >= min_width]
+    if len(nz) < min_nonzero_samples:
+        return 0
+    nz.sort()
+    return int(round(float(np.median(nz))))
+
+
+def _occupancy_values_from_side(mask: np.ndarray, side: str) -> list[float]:
+    h, w = mask.shape
+
+    if side in ("top", "bottom"):
+        length = h
+        span = float(w)
+    elif side in ("left", "right"):
+        length = w
+        span = float(h)
+    else:
+        raise ValueError(f"Unsupported side: {side}")
+
+    limit = min(length, SEARCH_DEPTH)
+    occ = []
+    for pos in range(limit):
+        if side == "top":
+            line = mask[pos, :]
+        elif side == "bottom":
+            line = mask[h - 1 - pos, :]
+        elif side == "left":
+            line = mask[:, pos]
+        else:
+            line = mask[:, w - 1 - pos]
+        occ.append(float(np.count_nonzero(line)) / max(span, 1.0))
+    return occ
+
+
+def _occupancy_run_from_side(mask: np.ndarray, side: str, occ: list[float] | None = None) -> int:
+    if occ is None:
+        occ = _occupancy_values_from_side(mask, side)
+    limit = len(occ)
+    p = 0
+    while p < limit and occ[p] < MIN_BORDER_OCCUPANCY:
+        p += 1
+    if p >= limit or p > MAX_OCCUPANCY_LEAD_IN:
+        return 0
+
+    start = p
+    while p < limit and occ[p] >= MIN_BORDER_OCCUPANCY:
+        p += 1
+    run = p - start
+    if run < MIN_OCCUPANCY_RUN:
+        return 0
+    return start + run
+
+
+def _extend_occupancy_run_from_side(
+    mask: np.ndarray,
+    side: str,
+    run: int,
+    occ: list[float] | None = None,
+) -> int:
+    if run <= 0:
+        return 0
+
+    if occ is None:
+        occ = _occupancy_values_from_side(mask, side)
+    limit = len(occ)
+    p = int(run)
+    last_keep = p - 1
+    gaps = 0
+    max_p = min(limit, p + MAX_OCCUPANCY_EXTENSION)
+
+    while p < max_p:
+        if occ[p] >= MIN_BORDER_TAIL_OCCUPANCY:
+            last_keep = p
+            gaps = 0
+            p += 1
+            continue
+
+        if (
+            gaps < MAX_OCCUPANCY_GAP
+            and p + 1 < max_p
+            and occ[p + 1] >= MIN_BORDER_TAIL_OCCUPANCY
+        ):
+            last_keep = p
+            gaps += 1
+            p += 1
+            continue
+
+        break
+
+    return last_keep + 1
+
+# Detect border stripes on all sides.
+def detect_border_stripes(mask: np.ndarray) -> dict:
+    h, w = mask.shape
+    y_samples = _sample_positions(h)
+    x_samples = _sample_positions(w)
+    left_runs = [_run_white_from_side(mask, y, "left") for y in y_samples]
+    right_runs = [_run_white_from_side(mask, y, "right") for y in y_samples]
+    top_runs = [_run_white_from_side(mask, x, "top") for x in x_samples]
+    bottom_runs = [_run_white_from_side(mask, x, "bottom") for x in x_samples]
+    left_occ_values = _occupancy_values_from_side(mask, "left")
+    right_occ_values = _occupancy_values_from_side(mask, "right")
+    top_occ_values = _occupancy_values_from_side(mask, "top")
+    bottom_occ_values = _occupancy_values_from_side(mask, "bottom")
+
+    left_occ = _occupancy_run_from_side(mask, "left", left_occ_values)
+    right_occ = _occupancy_run_from_side(mask, "right", right_occ_values)
+    top_occ = _occupancy_run_from_side(mask, "top", top_occ_values)
+    bottom_occ = _occupancy_run_from_side(mask, "bottom", bottom_occ_values)
+
+    left = max(_robust_border_width(left_runs), _extend_occupancy_run_from_side(mask, "left", left_occ, left_occ_values))
+    right = max(_robust_border_width(right_runs), _extend_occupancy_run_from_side(mask, "right", right_occ, right_occ_values))
+    top = max(_robust_border_width(top_runs), _extend_occupancy_run_from_side(mask, "top", top_occ, top_occ_values))
+    bottom = max(_robust_border_width(bottom_runs), _extend_occupancy_run_from_side(mask, "bottom", bottom_occ, bottom_occ_values))
+
+    return {
+        "left": left,
+        "right": right,
+        "top": top,
+        "bottom": bottom,
+        "left_runs": left_runs,
+        "right_runs": right_runs,
+        "top_runs": top_runs,
+        "bottom_runs": bottom_runs,
+        "y_samples": y_samples,
+        "x_samples": x_samples,
+    }
+
+# Remove detected border stripes from the mask.
+def cleanup_mask_by_detected_border_hard(
+    mask: np.ndarray,
+    *sides: str
+) -> tuple[np.ndarray, dict]:
+
+    if mask.max() > 1:
+        mask = normalize_mask(mask)
+
+    info = detect_border_stripes(mask)
+
+    out = mask.copy()
+    h, w = out.shape
+
+    l = int(info["left"]) + 1 if int(info["left"]) > 0 else 0
+    r = int(info["right"]) + 1 if int(info["right"]) > 0 else 0
+    t = int(info["top"]) + 1 if int(info["top"]) > 0 else 0
+    b = int(info["bottom"]) + 1 if int(info["bottom"]) > 0 else 0
+
+    if not sides:
+        cut_left = cut_right = cut_top = cut_bottom = True
+    else:
+        selected = {s.lower() for s in sides}
+        cut_left = "l" in selected
+        cut_right = "r" in selected
+        cut_top = "t" in selected
+        cut_bottom = "b" in selected
+
+    applied = {
+        "cut_left": l if cut_left and l > 0 else 0,
+        "cut_right": r if cut_right and r > 0 else 0,
+        "cut_top": t if cut_top and t > 0 else 0,
+        "cut_bottom": b if cut_bottom and b > 0 else 0,
+    }
+
+    if applied["cut_left"] > 0:
+        out[:, :min(applied["cut_left"], w)] = 0
+    if applied["cut_right"] > 0:
+        out[:, max(0, w - applied["cut_right"]):w] = 0
+    if applied["cut_top"] > 0:
+        out[:min(applied["cut_top"], h), :] = 0
+    if applied["cut_bottom"] > 0:
+        out[max(0, h - applied["cut_bottom"]):h, :] = 0
+
+    out = normalize_mask(out)
+    out = keep_components_by_area(out, min_area=550)
+    info["applied"] = applied
+
+    return out, info
+
+# Convert the source crop and mask into a BGRA object.
+def make_object_bgra(img_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    h, w = mask.shape
+    out = np.zeros((h, w, 4), dtype=np.uint8)
+    out[:, :, :3] = img_bgr
+    out[:, :, 3] = mask
+    out[mask == 0, :3] = 0
+    return out
+
+# Restore thin object bridges that may have been cut with the border.
+def restore_bridges_from_cut_lines(
+    seed: np.ndarray,
+    info: dict,
+    offset: int = 2,
+    min_run: int = 1,
+    min_gap: int = 2,
+    max_gap: int = 80,
+    bridge_thickness: int = 2,
+) -> np.ndarray:
+    out = normalize_mask(seed)
+    h, w = out.shape
+    applied = info.get("applied", {})
+
+    def find_runs(line: np.ndarray) -> list[tuple[int, int]]:
+        runs, start = [], None
+        for i, v in enumerate(line):
+            if v > 0 and start is None:
+                start = i
+            elif v == 0 and start is not None:
+                if i - start >= min_run:
+                    runs.append((start, i - 1))
+                start = None
+        if start is not None and len(line) - start >= min_run:
+            runs.append((start, len(line) - 1))
+        return runs
+
+    def find_gaps(line: np.ndarray) -> list[tuple[int, int]]:
+        runs = find_runs(line)
+        gaps = []
+        if len(runs) < 2:
+            return gaps
+
+        for a, b in zip(runs, runs[1:]):
+            g0, g1 = a[1] + 1, b[0] - 1
+            gap = g1 - g0 + 1
+            if min_gap <= gap <= max_gap:
+                gaps.append((g0, g1))
+
+        return gaps
+
+    sides = (
+        ("t", int(applied.get("cut_top", 0))),
+        ("b", int(applied.get("cut_bottom", 0))),
+        ("l", int(applied.get("cut_left", 0))),
+        ("r", int(applied.get("cut_right", 0))),
+    )
+
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+    for side, cut in sides:
+        if cut <= 0:
+            continue
+
+        bridge = np.zeros_like(out, dtype=np.uint8)
+
+        if side == "t":
+            pos_iter = range(min(max(cut, 0), h - 1), min(cut + offset + 1, h))
+            for y in pos_iter:
+                gaps = find_gaps(out[y, :])
+                if not gaps:
+                    continue
+                for g0, g1 in gaps:
+                    cv2.line(bridge, (g0, y), (g1, y), 255, bridge_thickness)
+                break
+
+        elif side == "b":
+            y0 = max(0, h - cut - offset)
+            y1 = min(h, h - cut)
+            for y in range(y1 - 1, y0 - 1, -1):
+                gaps = find_gaps(out[y, :])
+                if not gaps:
+                    continue
+                for g0, g1 in gaps:
+                    cv2.line(bridge, (g0, y), (g1, y), 255, bridge_thickness)
+                break
+
+        elif side == "l":
+            pos_iter = range(min(max(cut, 0), w - 1), min(cut + offset + 1, w))
+            for x in pos_iter:
+                gaps = find_gaps(out[:, x])
+                if not gaps:
+                    continue
+                for g0, g1 in gaps:
+                    cv2.line(bridge, (x, g0), (x, g1), 255, bridge_thickness)
+                break
+
+        elif side == "r":
+            x0 = max(0, w - cut - offset)
+            x1 = min(w, w - cut)
+            for x in range(x1 - 1, x0 - 1, -1):
+                gaps = find_gaps(out[:, x])
+                if not gaps:
+                    continue
+                for g0, g1 in gaps:
+                    cv2.line(bridge, (x, g0), (x, g1), 255, bridge_thickness)
+                break
+
+        if np.count_nonzero(bridge) > 0:
+            bridge = cv2.dilate(bridge, k, iterations=1)
+            out = normalize_mask(cv2.bitwise_or(out, bridge))
+
+    return out
+
+
+
+# Runtime entry points.
+def extract_object_with_info_from_crop(crop_bgr: np.ndarray) -> tuple[np.ndarray, dict]:
+    crop_scaled = resize_long_side_if_needed(crop_bgr)
+    em_scharr = _edge_map_scharr_max_channel_auto(crop_scaled)
+    mask_base = edge_mask_base(em_scharr)
+
+    seed, info = cleanup_mask_by_detected_border_hard(mask_base)
+    seed_fixed = restore_bridges_from_cut_lines(seed, info)
+    filled_fixed = fill_internal_holes(seed_fixed)
+    filled_fixed, _, bg_info = _apply_foreground_gate_from_empty_regions(
+        crop_scaled,
+        filled_fixed,
+        em_scharr,
+        min_area=150,
+    )
+    obj = make_object_bgra(crop_scaled, filled_fixed)
+    return obj, {
+        "scaled_shape": crop_scaled.shape[:2],
+        "applied_cuts": dict(info.get("applied", {})),
+        "cleanup_info": info,
+        "background_info": {
+            "sample_pixels": int(bg_info.get("sample_pixels", 0)),
+        },
+    }
+
+
+def extract_object_from_crop(crop_bgr: np.ndarray) -> np.ndarray:
+    obj, _ = extract_object_with_info_from_crop(crop_bgr)
+    return obj
+
+
+
