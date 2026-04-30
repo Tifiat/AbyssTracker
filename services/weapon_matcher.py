@@ -58,75 +58,6 @@ class RefEmbeddingRecord:
 _REF_EMBED_CACHE: dict[tuple[str, str, float, int], RefEmbeddingRecord] = {}
 
 
-def detect_weapon_rarity_from_crop(crop_bgr: np.ndarray) -> int | None:
-    h, w = crop_bgr.shape[:2]
-    if h < 20 or w < 20:
-        return None
-
-    img = crop_bgr.copy()
-
-    p = int(min(h, w) * 0.08)
-    if p > 0 and h - 2 * p >= 16 and w - 2 * p >= 16:
-        img = img[p:h - p, p:w - p]
-
-    hh, ww = img.shape[:2]
-    if hh < 16 or ww < 16:
-        return None
-
-    patch_size = int(min(hh, ww) * 0.22)
-    patch_size = max(8, patch_size)
-
-    patches = [
-        img[0:patch_size, 0:patch_size],
-        img[0:patch_size, ww - patch_size:ww],
-        img[hh - patch_size:hh, 0:patch_size],
-        img[hh - patch_size:hh, ww - patch_size:ww],
-    ]
-
-    hsv_pixels = []
-
-    for patch in patches:
-        if patch.size == 0:
-            continue
-
-        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-        H = hsv[:, :, 0]
-        S = hsv[:, :, 1]
-        V = hsv[:, :, 2]
-
-        mask = (V > 40) & (S > 25)
-        if np.count_nonzero(mask) < 6:
-            continue
-
-        hs = np.stack([H[mask], S[mask], V[mask]], axis=1)
-        hsv_pixels.append(hs)
-
-    if not hsv_pixels:
-        return None
-
-    hsv_all = np.concatenate(hsv_pixels, axis=0)
-    Hm = float(np.median(hsv_all[:, 0]))
-    Sm = float(np.median(hsv_all[:, 1]))
-    Vm = float(np.median(hsv_all[:, 2]))
-
-    if Sm < 35 and Vm > 60:
-        return 1
-
-    if 8 <= Hm <= 28 and Sm >= 70:
-        return 5
-
-    if 125 <= Hm <= 170 and Sm >= 45:
-        return 4
-
-    if 90 <= Hm < 125 and Sm >= 45:
-        return 3
-
-    if 40 <= Hm < 90 and Sm >= 40:
-        return 2
-
-    return None
-
-
 def build_weapon_candidate_index(weaps_db: dict) -> dict[tuple[str, int], list[str]]:
     out: dict[tuple[str, int], list[str]] = {}
     for wid, meta in weaps_db.items():
@@ -231,15 +162,16 @@ def _encode_reference_candidates(
     return np.stack(embeddings, axis=0).astype(np.float32), ref_ids, ref_meta, skipped_refs
 
 
-def match_weapon_crop(
-    crop_bgr: np.ndarray,
+def match_prepared_weapon_crop(
+    prepared_crop_bgra: np.ndarray,
+    crop_meta: dict,
     candidate_ids: list[str],
     weapon_type: str,
     cache_weapons_dir: str = "cache/enka_ref_weapons",
     top_k: int = 10,
     min_score: float = 0.0,
 ) -> DinoMatchDecision:
-    if crop_bgr is None:
+    if prepared_crop_bgra is None:
         return DinoMatchDecision(
             best_id=None,
             best_score=0.0,
@@ -257,8 +189,7 @@ def match_weapon_crop(
             extra={"reason": "no_candidates"},
         )
 
-    _, prepared_crop, crop_meta = prepare_compensated_crop(crop_bgr)
-    crop_embedding = encode_weapon_bgra_dino(prepared_crop)
+    crop_embedding = encode_weapon_bgra_dino(prepared_crop_bgra)
 
     ref_embeddings, ref_ids, ref_meta, skipped_refs = _encode_reference_candidates(
         candidate_ids=candidate_ids,
@@ -313,6 +244,35 @@ def match_weapon_crop(
             "crop_meta": crop_meta,
             "ref_meta": {item.ref_id: ref_meta.get(item.ref_id, {}) for item in top},
         },
+    )
+
+
+def match_weapon_crop(
+    crop_bgr: np.ndarray,
+    candidate_ids: list[str],
+    weapon_type: str,
+    cache_weapons_dir: str = "cache/enka_ref_weapons",
+    top_k: int = 10,
+    min_score: float = 0.0,
+) -> DinoMatchDecision:
+    if crop_bgr is None:
+        return DinoMatchDecision(
+            best_id=None,
+            best_score=0.0,
+            accepted=False,
+            top=[],
+            extra={"reason": "empty_crop"},
+        )
+
+    _, prepared_crop, crop_meta = prepare_compensated_crop(crop_bgr)
+    return match_prepared_weapon_crop(
+        prepared_crop_bgra=prepared_crop,
+        crop_meta=crop_meta,
+        candidate_ids=candidate_ids,
+        weapon_type=weapon_type,
+        cache_weapons_dir=cache_weapons_dir,
+        top_k=top_k,
+        min_score=min_score,
     )
 
 
@@ -439,7 +399,7 @@ def _load_ref_dino_input(
 
 
 def _save_match_debug_images(
-    crop_bgr: np.ndarray,
+    prepared_crop_bgra: np.ndarray,
     weapon_crop_name: str,
     weapon_type: str,
     rarity: int | None,
@@ -454,8 +414,7 @@ def _save_match_debug_images(
     _ensure_dir(refs_dir)
     _ensure_dir(bucket_dir)
 
-    _, prepared_crop, _ = prepare_compensated_crop(crop_bgr)
-    crop_dino = composite_bgra_on_background(prepared_crop)
+    crop_dino = composite_bgra_on_background(prepared_crop_bgra)
 
     base = _debug_base_name(
         weapon_crop_name=weapon_crop_name,
@@ -580,7 +539,26 @@ def match_weapons(
             })
             continue
 
-        rarity = detect_weapon_rarity_from_crop(crop_bgr)
+        try:
+            _, prepared_crop, crop_meta = prepare_compensated_crop(crop_bgr)
+        except Exception as exc:
+            rejected += 1
+            report["rejected"].append({
+                "crop": weapon_crop_name,
+                "char_crop": char_crop_name,
+                "weapon_type": str(weapon_type),
+                "reason": "crop_prepare_error",
+                "error": str(exc),
+            })
+            continue
+
+        rarity = crop_meta.get("rarity")
+        if rarity is not None:
+            try:
+                rarity = int(rarity)
+            except (TypeError, ValueError):
+                rarity = None
+
         candidate_ids = get_candidate_ids(
             weapon_type=str(weapon_type),
             rarity=rarity,
@@ -594,13 +572,15 @@ def match_weapons(
                 "char_crop": char_crop_name,
                 "weapon_type": str(weapon_type),
                 "rarity": rarity,
+                "crop_meta": crop_meta,
                 "reason": "no_candidates",
             })
             continue
 
         try:
-            decision = match_weapon_crop(
-                crop_bgr=crop_bgr,
+            decision = match_prepared_weapon_crop(
+                prepared_crop_bgra=prepared_crop,
+                crop_meta=crop_meta,
                 candidate_ids=candidate_ids,
                 weapon_type=str(weapon_type),
                 cache_weapons_dir=cache_weapons_dir,
@@ -614,6 +594,7 @@ def match_weapons(
                 "char_crop": char_crop_name,
                 "weapon_type": str(weapon_type),
                 "rarity": rarity,
+                "crop_meta": crop_meta,
                 "reason": "match_error",
                 "error": str(exc),
             })
@@ -629,7 +610,7 @@ def match_weapons(
 
         try:
             report_item["debug_images"] = _save_match_debug_images(
-                crop_bgr=crop_bgr,
+                prepared_crop_bgra=prepared_crop,
                 weapon_crop_name=weapon_crop_name,
                 weapon_type=str(weapon_type),
                 rarity=rarity,
@@ -708,8 +689,8 @@ Important temporary parts:
   prepared refs from the data-pack/cache instead.
 - min_score defaults to 0.0 so DINO top-1 is accepted for investigation. Real
   acceptance thresholds must be calibrated after debug runs.
-- detect_weapon_rarity_from_crop is copied from legacy for candidate filtering.
-  It may move to a small shared metadata/filter module later.
+- Weapon rarity comes from weapon_crop_extractor info. Do not re-add the old
+  legacy HSV corner detector here.
 
 Production work still needed:
 - Load ref embeddings from the SQLite data-pack instead of computing them here.

@@ -516,8 +516,12 @@ def _robust_border_width(
     min_nonzero_samples: int = 3,
     min_width: int = 2,
 ) -> int:
+    min_support = max(
+        int(min_nonzero_samples),
+        int(np.ceil(float(len(runs)) * BORDER_STRIPE_MIN_SUPPORT_FRACTION)),
+    )
     nz = [int(v) for v in runs if int(v) >= min_width]
-    if len(nz) < min_nonzero_samples:
+    if len(nz) < min_support:
         return 0
     nz.sort()
     return int(round(float(np.median(nz))))
@@ -824,11 +828,14 @@ def extract_object_with_info_from_crop(crop_bgr: np.ndarray) -> tuple[np.ndarray
         em_scharr,
         min_area=150,
     )
+    rarity_info = detect_rarity_from_background_samples(crop_scaled, bg_info["sample_mask"])
     obj = make_object_bgra(crop_scaled, filled_fixed)
     return obj, {
         "scaled_shape": crop_scaled.shape[:2],
         "applied_cuts": dict(info.get("applied", {})),
         "cleanup_info": info,
+        "rarity": rarity_info["rarity"],
+        "rarity_info": rarity_info,
         "background_info": {
             "sample_pixels": int(bg_info.get("sample_pixels", 0)),
         },
