@@ -579,8 +579,8 @@ class HoyolabParser:
         if not chars or not weaps:
             return pairs
         h_med = float(np.median([r.h for _, r in chars]))
+        min_right_dx = h_med * 0.05
         row_tol = h_med * 0.70  # допуск "в одной строке"
-        prefer_right = h_med * 0.40  # мягкий штраф, если оружие сильно слева
 
         for w_idx, wr in weaps:
             best = None
@@ -597,14 +597,15 @@ class HoyolabParser:
                 dx = wr.cx - cr.cx
                 dy = wr.cy - cr.cy
 
+                # HoYoLAB places the weapon icon to the right of its character.
+                # If a character crop is missing, do not pair that orphan weapon
+                # with the next character on the right.
+                if dx <= min_right_dx:
+                    continue
+
                 dist = (dx * dx + (dy * dy) * 1.2) ** 0.5
 
-                # 2) штраф если оружие сильно слева от перса (но не запрещаем)
-                penalty = 0.0
-                if dx < -prefer_right:
-                    penalty = abs(dx) * 0.6
-
-                cost = dist + penalty
+                cost = dist
 
                 if cost < best_cost:
                     best_cost = cost

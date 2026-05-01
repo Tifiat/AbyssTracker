@@ -2,6 +2,7 @@ import os
 import shutil
 import json
 import cv2
+import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -301,6 +302,10 @@ class App(QWidget):
 		self.reload_weapons()
 
 	# ---------- LOGIC ----------
+	def _finish_screenshot_timing(self, started_at: float, label: str = "SCREENSHOT WORKFLOW TOTAL"):
+		elapsed = time.perf_counter() - started_at
+		print(f"{label}: {elapsed:.2f}s ({elapsed / 60.0:.2f} min)")
+
 	def calculate_abyss(self):
 		total = sum(f.calculate() for f in self.floors)
 		self.total_label.setText(f"Итого: {total} сек")
@@ -344,6 +349,9 @@ class App(QWidget):
 		if not path:
 			return
 
+		workflow_started_at = time.perf_counter()
+		print(f"SCREENSHOT WORKFLOW START: {os.path.basename(path)}")
+
 		try:
 			check_and_update()
 		except Exception as e:
@@ -378,6 +386,7 @@ class App(QWidget):
 		if not char_map:
 			print("char_map пустой — оружие пропущено (нет распознанных персонажей).")
 			self._refresh_ui_after_parse()
+			self._finish_screenshot_timing(workflow_started_at)
 			return
 
 		try:
@@ -388,6 +397,7 @@ class App(QWidget):
 		except Exception as e:
 			print("Не удалось загрузить data/*.json:", e)
 			self._refresh_ui_after_parse()
+			self._finish_screenshot_timing(workflow_started_at)
 			return
 
 		try:
@@ -416,6 +426,7 @@ class App(QWidget):
 			print("match_weapons failed:", e)
 
 		self._refresh_ui_after_parse()
+		self._finish_screenshot_timing(workflow_started_at)
 
 	def clear_assets(self):
 		folders_to_clear = [
