@@ -910,6 +910,21 @@ def _write_report(debug_dir: str, report: dict):
         pass
 
 
+def _write_weapon_mapping(debug_dir: str, mapping: dict[str, str]):
+    _ensure_dir(_p(debug_dir))
+    path = _p(debug_dir, "weapon_mapping.json")
+    try:
+        ordered = {
+            key: mapping[key]
+            for key in sorted(mapping)
+        }
+        text = json.dumps(_json_safe(ordered), ensure_ascii=False, indent=2)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception:
+        pass
+
+
 def _debug_base_name(
     weapon_crop_name: str,
     weapon_type: str,
@@ -1119,6 +1134,7 @@ def match_weapons(
         "rejected": [],
         "skipped": [],
     }
+    weapon_mapping: dict[str, str] = {}
 
     pairs = parsed.get("pairs", [])
     for pair in pairs:
@@ -1250,6 +1266,7 @@ def match_weapons(
 
         accepted_total += 1
         report["accepted"].append(report_item)
+        weapon_mapping[os.path.splitext(weapon_crop_name)[0]] = str(decision.best_id)
 
         dst = _p(out_hd_weap_dir, f"{decision.best_id}.png")
         existed_before = os.path.exists(dst)
@@ -1280,6 +1297,7 @@ def match_weapons(
     }
     report["summary"] = result
     _write_report(debug_dir, report)
+    _write_weapon_mapping(debug_dir, weapon_mapping)
     return result
 
 
