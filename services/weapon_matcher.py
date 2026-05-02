@@ -81,6 +81,12 @@ GLOBAL_DINO_RERANK_TOP_K = 10
 BOW_GLOBAL_DINO_RERANK_TOP_K = 15
 PATCH_COLOR_RERANK_WINDOW = 0.020
 RED_CLONE_RERANK_WINDOW = 0.045
+STRONG_RED_MATCH_WINDOW = 0.030
+STRONG_RED_MATCH_BONUS = 0.070
+BOW_BLUE_MATCH_WINDOW = 0.030
+BOW_BLUE_MATCH_BONUS = 0.050
+POLEARM_PATCH_MASS_WINDOW = 0.025
+POLEARM_PATCH_MASS_WEIGHT = 0.060
 PATCH_COLOR_SCORE_WEIGHT = 0.075
 PATCH_COLOR_REJECT_PENALTY = 0.0
 GLOBAL_DINO_TIEBREAK_WEIGHT = 0.03
@@ -466,6 +472,8 @@ def _patch_color_adjusted_score(
     global_bonus = float(GLOBAL_DINO_TIEBREAK_WEIGHT) * dino_score
     color_bonus = 0.0
     color_penalty = 0.0
+    strong_red_bonus = 0.0
+    bow_blue_bonus = 0.0
     polearm_color_structure_penalty = 0.0
     if in_window:
         color_bonus = float(color_weight) * effective_color_score
@@ -477,8 +485,10 @@ def _patch_color_adjusted_score(
             color_penalty += float(PATCH_COLOR_REJECT_PENALTY)
     if in_red_clone_window:
         color_penalty += float(dominant.get("clone_penalty", 0.0))
+    strong_red_bonus = _strong_red_match_bonus(color, patch_delta)
+    bow_blue_bonus = _bow_blue_match_bonus(color, patch_delta, weapon_type)
 
-    final_score = patch_score + global_bonus + color_bonus - color_penalty
+    final_score = patch_score + global_bonus + color_bonus + strong_red_bonus + bow_blue_bonus - color_penalty
     return float(final_score), {
         "enabled": bool(in_window),
         "red_clone_enabled": bool(in_red_clone_window),
@@ -487,6 +497,8 @@ def _patch_color_adjusted_score(
         "red_clone_window": float(RED_CLONE_RERANK_WINDOW),
         "global_bonus": float(global_bonus),
         "color_bonus": float(color_bonus),
+        "strong_red_bonus": float(strong_red_bonus),
+        "bow_blue_bonus": float(bow_blue_bonus),
         "color_weight": float(color_weight),
         "color_penalty": float(color_penalty),
         "polearm_color_structure_penalty": float(polearm_color_structure_penalty),
@@ -495,6 +507,32 @@ def _patch_color_adjusted_score(
         "dominant_color": dominant,
         "base_patch_score": float(patch_score),
     }
+
+
+def _strong_red_match_bonus(color: dict, patch_delta: float) -> float:
+    if float(patch_delta) > float(STRONG_RED_MATCH_WINDOW):
+        return 0.0
+    crop_fractions = color.get("crop", {}).get("color_fractions", {}) or {}
+    ref_fractions = color.get("ref", {}).get("color_fractions", {}) or {}
+    crop_red = float(crop_fractions.get("red", 0.0))
+    ref_red = float(ref_fractions.get("red", 0.0))
+    if crop_red >= 0.30 and ref_red >= 0.35 and abs(crop_red - ref_red) <= 0.15:
+        return float(STRONG_RED_MATCH_BONUS)
+    return 0.0
+
+
+def _bow_blue_match_bonus(color: dict, patch_delta: float, weapon_type: str) -> float:
+    if str(weapon_type).lower() != "bow":
+        return 0.0
+    if float(patch_delta) > float(BOW_BLUE_MATCH_WINDOW):
+        return 0.0
+    crop_families = color.get("crop", {}).get("color_families", {}) or {}
+    ref_families = color.get("ref", {}).get("color_families", {}) or {}
+    crop_blue = float(crop_families.get("blue", 0.0))
+    ref_blue = float(ref_families.get("blue", 0.0))
+    if crop_blue >= 0.45 and ref_blue >= 0.45:
+        return float(BOW_BLUE_MATCH_BONUS)
+    return 0.0
 
 
 def _dominant_family(families: dict) -> tuple[str | None, float]:
@@ -585,6 +623,19 @@ def _polearm_color_structure_penalty(color: dict) -> float:
     if ref_warm - crop_warm >= 0.30:
         penalty += float(POLEARM_COLOR_STRUCTURE_PENALTY)
     return float(penalty)
+
+
+def _polearm_patch_mass_bonus(patch_dino: dict, patch_delta: float, weapon_type: str) -> float:
+    if str(weapon_type).lower() != "polearm":
+        return 0.0
+    if float(patch_delta) > float(POLEARM_PATCH_MASS_WINDOW):
+        return 0.0
+    query_count = float(patch_dino.get("query_active_tokens") or 0.0)
+    ref_count = float(patch_dino.get("ref_active_tokens") or 0.0)
+    if query_count <= 0.0 or ref_count <= 0.0:
+        return 0.0
+    similarity = 1.0 - (abs(query_count - ref_count) / max(query_count, ref_count))
+    return float(POLEARM_PATCH_MASS_WEIGHT) * float(np.clip(similarity, 0.0, 1.0))
 
 
 def match_prepared_weapon_crop(
@@ -693,6 +744,7 @@ def match_prepared_weapon_crop(
     if hybrid_items:
         best_patch_score = max(float(item.metrics["patch_dino"]["score"]) for item in hybrid_items)
         for item in hybrid_items:
+            patch_delta = max(0.0, best_patch_score - float(item.metrics["patch_dino"]["score"]))
             color_weight = 0.0 if str(weapon_type).lower() == "polearm" else float(PATCH_COLOR_SCORE_WEIGHT)
             adjusted_score, color_rerank = _patch_color_adjusted_score(
                 patch_score=float(item.metrics["patch_dino"]["score"]),
@@ -702,6 +754,13 @@ def match_prepared_weapon_crop(
                 color_weight=color_weight,
                 weapon_type=weapon_type,
             )
+            polearm_mass_bonus = _polearm_patch_mass_bonus(
+                patch_dino=item.metrics["patch_dino"],
+                patch_delta=patch_delta,
+                weapon_type=weapon_type,
+            )
+            adjusted_score += polearm_mass_bonus
+            color_rerank["polearm_patch_mass_bonus"] = float(polearm_mass_bonus)
             item.score = adjusted_score
             item.metrics["color_rerank"] = color_rerank
 
