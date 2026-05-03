@@ -22,4 +22,5 @@ debug/
 /data/manifest.json
 /data/weapons.json
 /data/
-/test/
+/test/hoyolab_export/profile/
+/test/hoyolab_export/profile_chrome_debug/
