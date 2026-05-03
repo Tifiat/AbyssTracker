@@ -1,0 +1,1052 @@
+[
+  {
+    "id": 15508,
+    "name": "Аква симулякрум",
+    "rarity": 5,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/0986345abd92564279c5a11f491bd6c0.png",
+    "equipped_by": {
+      "id": 10000060,
+      "name": "Е Лань"
+    }
+  },
+  {
+    "id": 15514,
+    "name": "Алое перо звёздного грифа",
+    "rarity": 5,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/afac47d999995ce3577c7034ff277c44.png",
+    "equipped_by": {
+      "id": 10000069,
+      "name": "Тигнари"
+    }
+  },
+  {
+    "id": 15516,
+    "name": "Золотая клятва льда",
+    "rarity": 5,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/69d58c7d/f2f6618938b4163623b68daf1b165fe0.png",
+    "equipped_by": {
+      "id": 10000130,
+      "name": "Линнея"
+    }
+  },
+  {
+    "id": 15501,
+    "name": "Небесное крыло",
+    "rarity": 5,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/504e181be5a8ba069b7249a3f7cf978d.png",
+    "equipped_by": {
+      "id": 10000104,
+      "name": "Часка"
+    }
+  },
+  {
+    "id": 15402,
+    "name": "Бесструнный",
+    "rarity": 4,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/da3d5e7bbc112c4e1378de554a79c6c3.png",
+    "equipped_by": {
+      "id": 10000056,
+      "name": "Сара"
+    }
+  },
+  {
+    "id": 15401,
+    "name": "Боевой лук Фавония",
+    "rarity": 4,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/f0b8edcc330cd9de1dcf97eccb20cbaf.png",
+    "equipped_by": {
+      "id": 10000067,
+      "name": "Коллеи"
+    }
+  },
+  {
+    "id": 15410,
+    "name": "Охотник во тьме",
+    "rarity": 4,
+    "type": 12,
+    "type_name": "bow",
+    "level": 40,
+    "refinement": 3,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/0bf9e977296b6c9a5e6aff3ef377a3b9.png",
+    "equipped_by": {
+      "id": 10000031,
+      "name": "Фишль"
+    }
+  },
+  {
+    "id": 15434,
+    "name": "Струны дождя радужного змея",
+    "rarity": 4,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/692f7d8b/430a2ee3f7bb4817d96e4179110ffb21.png",
+    "equipped_by": {
+      "id": 10000105,
+      "name": "Оророн"
+    }
+  },
+  {
+    "id": 15403,
+    "name": "Церемониальный лук",
+    "rarity": 4,
+    "type": 12,
+    "type_name": "bow",
+    "level": 60,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/4a03625fdbc739dca379573871a4c2ca.png",
+    "equipped_by": {
+      "id": 10000055,
+      "name": "Горо"
+    }
+  },
+  {
+    "id": 15304,
+    "name": "Рогатка",
+    "rarity": 3,
+    "type": 12,
+    "type_name": "bow",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/416221f265d0b711d55ad9146bfdb306.png",
+    "equipped_by": {
+      "id": 10000097,
+      "name": "Сетос"
+    }
+  },
+  {
+    "id": 15101,
+    "name": "Лук охотника",
+    "rarity": 1,
+    "type": 12,
+    "type_name": "bow",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/c75ade4a5acb5eb9aaefbed318bf75ff.png",
+    "equipped_by": {
+      "id": 10000039,
+      "name": "Диона"
+    }
+  },
+  {
+    "id": 15101,
+    "name": "Лук охотника",
+    "rarity": 1,
+    "type": 12,
+    "type_name": "bow",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/c75ade4a5acb5eb9aaefbed318bf75ff.png",
+    "equipped_by": {
+      "id": 10000076,
+      "name": "Фарузан"
+    }
+  },
+  {
+    "id": 15101,
+    "name": "Лук охотника",
+    "rarity": 1,
+    "type": 12,
+    "type_name": "bow",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/c75ade4a5acb5eb9aaefbed318bf75ff.png",
+    "equipped_by": {
+      "id": 10000021,
+      "name": "Эмбер"
+    }
+  },
+  {
+    "id": 15101,
+    "name": "Лук охотника",
+    "rarity": 1,
+    "type": 12,
+    "type_name": "bow",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/c75ade4a5acb5eb9aaefbed318bf75ff.png",
+    "equipped_by": {
+      "id": 10000124,
+      "name": "Ягода"
+    }
+  },
+  {
+    "id": 14517,
+    "name": "Бдение взывающего к звёздам",
+    "rarity": 5,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/dbf7751578357bde53f9b563aee72250.png",
+    "equipped_by": {
+      "id": 10000107,
+      "name": "Ситлали"
+    }
+  },
+  {
+    "id": 14501,
+    "name": "Небесный атлас",
+    "rarity": 5,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/d3f398d9ee417e931b1e273242dd8008.png",
+    "equipped_by": {
+      "id": 10000093,
+      "name": "Сянь Юнь"
+    }
+  },
+  {
+    "id": 14519,
+    "name": "Переливающиеся чаяния",
+    "rarity": 5,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67e3357c/db3c23247fa556442b7d1fdd5e4a4fb6.png",
+    "equipped_by": {
+      "id": 10000111,
+      "name": "Вареса"
+    }
+  },
+  {
+    "id": 14424,
+    "name": "Жертвенный нефрит",
+    "rarity": 4,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 2,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/95e2a7c637afe59f0ec81b2da9ad49c9.png",
+    "equipped_by": {
+      "id": 10000073,
+      "name": "Нахида"
+    }
+  },
+  {
+    "id": 14401,
+    "name": "Кодекс Фавония",
+    "rarity": 4,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/bb4ff947d3649e393b6ca2e117b072d6.png",
+    "equipped_by": {
+      "id": 10000041,
+      "name": "Мона"
+    }
+  },
+  {
+    "id": 14402,
+    "name": "Песнь странника",
+    "rarity": 4,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/22d2b64c9fd0ab81ef934c8387f72d0c.png",
+    "equipped_by": {
+      "id": 10000059,
+      "name": "Хэйдзо"
+    }
+  },
+  {
+    "id": 14406,
+    "name": "Прототип: Янтарь",
+    "rarity": 4,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 70,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/00d58c6a9f08c487851206576c962551.png",
+    "equipped_by": {
+      "id": 10000088,
+      "name": "Шарлотта"
+    }
+  },
+  {
+    "id": 14416,
+    "name": "Скитающаяся звезда",
+    "rarity": 4,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 4,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/e8d25e1a09cbca9b5069ad93c00d7b68.png",
+    "equipped_by": {
+      "id": 10000119,
+      "name": "Лаума"
+    }
+  },
+  {
+    "id": 14403,
+    "name": "Церемониальные мемуары",
+    "rarity": 4,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/807ae55311a3a8382194a656e214e7b1.png",
+    "equipped_by": {
+      "id": 10000043,
+      "name": "Сахароза"
+    }
+  },
+  {
+    "id": 14302,
+    "name": "Эпос о драконоборцах",
+    "rarity": 3,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 70,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/aff08755a2149ffb6c0fa7d1d189a222.png",
+    "equipped_by": {
+      "id": 10000014,
+      "name": "Барбара"
+    }
+  },
+  {
+    "id": 14201,
+    "name": "Карманный гримуар",
+    "rarity": 2,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/5edb79d30c591ca6dbb84deeb4fa64d8.png",
+    "equipped_by": {
+      "id": 10000048,
+      "name": "Янь Фэй"
+    }
+  },
+  {
+    "id": 14101,
+    "name": "Записи ученика",
+    "rarity": 1,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/852d232e46ddaacdfcb86b3f53413405.png",
+    "equipped_by": {
+      "id": 10000113,
+      "name": "Ифа"
+    }
+  },
+  {
+    "id": 14101,
+    "name": "Записи ученика",
+    "rarity": 1,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/852d232e46ddaacdfcb86b3f53413405.png",
+    "equipped_by": {
+      "id": 10000108,
+      "name": "Лань Янь"
+    }
+  },
+  {
+    "id": 14101,
+    "name": "Записи ученика",
+    "rarity": 1,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/852d232e46ddaacdfcb86b3f53413405.png",
+    "equipped_by": {
+      "id": 10000006,
+      "name": "Лиза"
+    }
+  },
+  {
+    "id": 14101,
+    "name": "Записи ученика",
+    "rarity": 1,
+    "type": 10,
+    "type_name": "catalyst",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/852d232e46ddaacdfcb86b3f53413405.png",
+    "equipped_by": {
+      "id": 10000027,
+      "name": "Нин Гуан"
+    }
+  },
+  {
+    "id": 12513,
+    "name": "Клык Горного короля",
+    "rarity": 5,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/a9184535c8743e8da52fa2debd54f7d8.png",
+    "equipped_by": {
+      "id": 10000101,
+      "name": "Кинич"
+    }
+  },
+  {
+    "id": 12514,
+    "name": "Тысяча ослепительных солнц",
+    "rarity": 5,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/6e57c13f34e89eae3339461e4f1afe3f.png",
+    "equipped_by": {
+      "id": 10000106,
+      "name": "Мавуика"
+    }
+  },
+  {
+    "id": 12432,
+    "name": "Выкованное пламенем озарение",
+    "rarity": 4,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/6889608b/5662318eb81ba5f01cbaa8ef2b9b2214.png",
+    "equipped_by": {
+      "id": 10000121,
+      "name": "Айно"
+    }
+  },
+  {
+    "id": 12401,
+    "name": "Двуручный меч Фавония",
+    "rarity": 4,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7646388f158d62d56f368631a37427c3.png",
+    "equipped_by": {
+      "id": 10000024,
+      "name": "Бэй Доу"
+    }
+  },
+  {
+    "id": 12401,
+    "name": "Двуручный меч Фавония",
+    "rarity": 4,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7646388f158d62d56f368631a37427c3.png",
+    "equipped_by": {
+      "id": 10000068,
+      "name": "Дори"
+    }
+  },
+  {
+    "id": 12401,
+    "name": "Двуручный меч Фавония",
+    "rarity": 4,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7646388f158d62d56f368631a37427c3.png",
+    "equipped_by": {
+      "id": 10000034,
+      "name": "Ноэлль"
+    }
+  },
+  {
+    "id": 12409,
+    "name": "Меч драконьей кости",
+    "rarity": 4,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/8add3ad74e3838695ee23cacbe99e776.png",
+    "equipped_by": {
+      "id": 10000092,
+      "name": "Ка Мин"
+    }
+  },
+  {
+    "id": 12430,
+    "name": "Плодотворный крюк",
+    "rarity": 4,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 90,
+    "refinement": 3,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/c60cc5afa76926ae412d6c66224f972b.png",
+    "equipped_by": {
+      "id": 10000091,
+      "name": "Навия"
+    }
+  },
+  {
+    "id": 12403,
+    "name": "Церемониальный двуручный меч",
+    "rarity": 4,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 60,
+    "refinement": 3,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/b79312ddc86e05133b8a8d984f9931e1.png",
+    "equipped_by": {
+      "id": 10000036,
+      "name": "Чун Юнь"
+    }
+  },
+  {
+    "id": 12305,
+    "name": "Дубина переговоров",
+    "rarity": 3,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7c806b2d328c89e3f7c6d70b01214af7.png",
+    "equipped_by": {
+      "id": 10000081,
+      "name": "Кавех"
+    }
+  },
+  {
+    "id": 12301,
+    "name": "Металлическая тень",
+    "rarity": 3,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/f7299d46b25b942d3ff3de4b01d3543a.png",
+    "equipped_by": {
+      "id": 10000044,
+      "name": "Синь Янь"
+    }
+  },
+  {
+    "id": 12302,
+    "name": "Меч драконьей крови",
+    "rarity": 3,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/533baca38d78bed9a7334ebd15eb972e.png",
+    "equipped_by": {
+      "id": 10000016,
+      "name": "Дилюк"
+    }
+  },
+  {
+    "id": 12201,
+    "name": "Лучший друг наёмника",
+    "rarity": 2,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/165dd007459fa4897a6ddeefe3993e6a.png",
+    "equipped_by": {
+      "id": 10000020,
+      "name": "Рэйзор"
+    }
+  },
+  {
+    "id": 12101,
+    "name": "Двуручный меч богатыря",
+    "rarity": 1,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/b1e284917f1ca8330ba929ef8f116aba.png",
+    "equipped_by": {
+      "id": 10000079,
+      "name": "Дэхья"
+    }
+  },
+  {
+    "id": 12101,
+    "name": "Двуручный меч богатыря",
+    "rarity": 1,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/b1e284917f1ca8330ba929ef8f116aba.png",
+    "equipped_by": {
+      "id": 10000053,
+      "name": "Саю"
+    }
+  },
+  {
+    "id": 12101,
+    "name": "Двуручный меч богатыря",
+    "rarity": 1,
+    "type": 11,
+    "type_name": "claymore",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/b1e284917f1ca8330ba929ef8f116aba.png",
+    "equipped_by": {
+      "id": 10000085,
+      "name": "Фремине"
+    }
+  },
+  {
+    "id": 13515,
+    "name": "Расколотый ореол",
+    "rarity": 5,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/6889608b/9d23036ecf61183797246cf410765956.png",
+    "equipped_by": {
+      "id": 10000116,
+      "name": "Инеффа"
+    }
+  },
+  {
+    "id": 13513,
+    "name": "Элегия Люмидус",
+    "rarity": 5,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/815db248eebc121db24905994b274150.png",
+    "equipped_by": {
+      "id": 10000099,
+      "name": "Эмилия"
+    }
+  },
+  {
+    "id": 13415,
+    "name": "«Улов»",
+    "rarity": 4,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/643071ffc7526446b48101f159ee0437.png",
+    "equipped_by": {
+      "id": 10000023,
+      "name": "Сян Лин"
+    }
+  },
+  {
+    "id": 13407,
+    "name": "Копьё Фавония",
+    "rarity": 4,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7db45b7a84bb80468aaf0f5f430e9bdc.png",
+    "equipped_by": {
+      "id": 10000050,
+      "name": "Тома"
+    }
+  },
+  {
+    "id": 13407,
+    "name": "Копьё Фавония",
+    "rarity": 4,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 40,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7db45b7a84bb80468aaf0f5f430e9bdc.png",
+    "equipped_by": {
+      "id": 10000090,
+      "name": "Шеврёз"
+    }
+  },
+  {
+    "id": 13407,
+    "name": "Копьё Фавония",
+    "rarity": 4,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 53,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7db45b7a84bb80468aaf0f5f430e9bdc.png",
+    "equipped_by": {
+      "id": 10000077,
+      "name": "Яо Яо"
+    }
+  },
+  {
+    "id": 13431,
+    "name": "След радуги",
+    "rarity": 4,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 90,
+    "refinement": 4,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/61747b9617129bbe11dcf84a93de3fe1.png",
+    "equipped_by": {
+      "id": 10000100,
+      "name": "Качина"
+    }
+  },
+  {
+    "id": 13405,
+    "name": "Смертельный бой",
+    "rarity": 4,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/e28812a4dbe5207d8d88c68a53212692.png",
+    "equipped_by": {
+      "id": 10000120,
+      "name": "Флинс"
+    }
+  },
+  {
+    "id": 13432,
+    "name": "Тамаюратэй но оханаси",
+    "rarity": 4,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7530c502a61c663424986c74899e4b1b.png",
+    "equipped_by": {
+      "id": 10000110,
+      "name": "Иансан"
+    }
+  },
+  {
+    "id": 13303,
+    "name": "Чёрная кисть",
+    "rarity": 3,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 60,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/badaa063427a6e3f39d9c031b3dddc24.png",
+    "equipped_by": {
+      "id": 10000045,
+      "name": "Розария"
+    }
+  },
+  {
+    "id": 13101,
+    "name": "Копьё новичка",
+    "rarity": 1,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/ca0ea04c05d8994f0b7e836012e38563.png",
+    "equipped_by": {
+      "id": 10000127,
+      "name": "Иллуги"
+    }
+  },
+  {
+    "id": 13101,
+    "name": "Копьё новичка",
+    "rarity": 1,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/ca0ea04c05d8994f0b7e836012e38563.png",
+    "equipped_by": {
+      "id": 10000072,
+      "name": "Кандакия"
+    }
+  },
+  {
+    "id": 13101,
+    "name": "Копьё новичка",
+    "rarity": 1,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/ca0ea04c05d8994f0b7e836012e38563.png",
+    "equipped_by": {
+      "id": 10000080,
+      "name": "Мика"
+    }
+  },
+  {
+    "id": 13101,
+    "name": "Копьё новичка",
+    "rarity": 1,
+    "type": 13,
+    "type_name": "polearm",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/ca0ea04c05d8994f0b7e836012e38563.png",
+    "equipped_by": {
+      "id": 10000064,
+      "name": "Юнь Цзинь"
+    }
+  },
+  {
+    "id": 11516,
+    "name": "Песнь патруля пиков",
+    "rarity": 5,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/192f70211e4456786ebb3cb0c9222e43.png",
+    "equipped_by": {
+      "id": 10000032,
+      "name": "Беннет"
+    }
+  },
+  {
+    "id": 11432,
+    "name": "Бедствие Эшу",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/6afc33638bed2a9fbc85e2fd2147924e.png",
+    "equipped_by": {
+      "id": 10000015,
+      "name": "Кэйа"
+    }
+  },
+  {
+    "id": 11424,
+    "name": "Волчий клык",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/86a26398db607012d49be9f7e0dd0476.png",
+    "equipped_by": {
+      "id": 10000123,
+      "name": "Дурин"
+    }
+  },
+  {
+    "id": 11417,
+    "name": "Деревянный клинок",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 3,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/ade9757e4346ef1402c32bdde6b7a7e4.png",
+    "equipped_by": {
+      "id": 10000007,
+      "name": "Путешественница"
+    }
+  },
+  {
+    "id": 11416,
+    "name": "Кагоцурубэ Иссин",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/d0bc1a9d160a598e7cfe669f71402662.png",
+    "equipped_by": {
+      "id": 10000083,
+      "name": "Линетт"
+    }
+  },
+  {
+    "id": 11428,
+    "name": "Меч Нарциссенкрейца",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 80,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7ef90872b3553d9c0f4e3452737cec2d.png",
+    "equipped_by": {
+      "id": 10000103,
+      "name": "Шилонен"
+    }
+  },
+  {
+    "id": 11401,
+    "name": "Меч Фавония",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/cfda75195bd9c341e314a56e976d532f.png",
+    "equipped_by": {
+      "id": 10000003,
+      "name": "Джинн"
+    }
+  },
+  {
+    "id": 11401,
+    "name": "Меч Фавония",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 2,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/cfda75195bd9c341e314a56e976d532f.png",
+    "equipped_by": {
+      "id": 10000074,
+      "name": "Лайла"
+    }
+  },
+  {
+    "id": 11426,
+    "name": "Перевозчик Флёв Сандр",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/7ef38be38f19ff27bbba79f48b29e3c1.png",
+    "equipped_by": {
+      "id": 10000089,
+      "name": "Фурина"
+    }
+  },
+  {
+    "id": 11403,
+    "name": "Церемониальный меч",
+    "rarity": 4,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 5,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/8d40dcb0e8e25ad6c5940095fa6984ab.png",
+    "equipped_by": {
+      "id": 10000025,
+      "name": "Син Цю"
+    }
+  },
+  {
+    "id": 11306,
+    "name": "Меч небесного всадника",
+    "rarity": 3,
+    "type": 1,
+    "type_name": "sword",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/bc3f197fd37c0f92f0f253f578a1d266.png",
+    "equipped_by": {
+      "id": 10000061,
+      "name": "Кирара"
+    }
+  },
+  {
+    "id": 11304,
+    "name": "Тёмный железный меч",
+    "rarity": 3,
+    "type": 1,
+    "type_name": "sword",
+    "level": 90,
+    "refinement": 2,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/14dbdf6255569327567b6e5e9f113fd4.png",
+    "equipped_by": {
+      "id": 10000065,
+      "name": "Синобу"
+    }
+  },
+  {
+    "id": 11201,
+    "name": "Серебряный меч",
+    "rarity": 2,
+    "type": 1,
+    "type_name": "sword",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/73748953f526f339fe5ed1707c295fd9.png",
+    "equipped_by": {
+      "id": 10000035,
+      "name": "Ци Ци"
+    }
+  },
+  {
+    "id": 11101,
+    "name": "Тупой меч",
+    "rarity": 1,
+    "type": 1,
+    "type_name": "sword",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/0b590e80914fdb8e348323fff888be0c.png",
+    "equipped_by": {
+      "id": 10000042,
+      "name": "Кэ Цин"
+    }
+  },
+  {
+    "id": 11101,
+    "name": "Тупой меч",
+    "rarity": 1,
+    "type": 1,
+    "type_name": "sword",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/0b590e80914fdb8e348323fff888be0c.png",
+    "equipped_by": {
+      "id": 10000118,
+      "name": "Манекен (ж)"
+    }
+  },
+  {
+    "id": 11101,
+    "name": "Тупой меч",
+    "rarity": 1,
+    "type": 1,
+    "type_name": "sword",
+    "level": 1,
+    "refinement": 1,
+    "icon": "https://act-webstatic.hoyoverse.com/hk4e/e20200928calculate/item_icon/67c7f6c8/0b590e80914fdb8e348323fff888be0c.png",
+    "equipped_by": {
+      "id": 10000117,
+      "name": "Манекен (м)"
+    }
+  }
+]
